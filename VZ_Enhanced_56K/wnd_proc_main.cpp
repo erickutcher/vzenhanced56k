@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2017 Eric Kutcher
+	Copyright (C) 2013-2018 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -86,11 +86,7 @@ VOID CALLBACK UpdateTimerProc( HWND hWnd, UINT msg, UINT idTimer, DWORD dwTime )
 
 			update_check_state = 2;	// Automatic update check.
 
-			UPDATE_CHECK_INFO *update_info = ( UPDATE_CHECK_INFO * )GlobalAlloc( GMEM_FIXED, sizeof( UPDATE_CHECK_INFO ) );
-			update_info->notes = NULL;
-			update_info->download_url = NULL;
-			update_info->version = 0;
-			update_info->got_update = false;
+			UPDATE_CHECK_INFO *update_info = ( UPDATE_CHECK_INFO * )GlobalAlloc( GPTR, sizeof( UPDATE_CHECK_INFO ) );
 			CloseHandle( ( HANDLE )_CreateThread( NULL, 0, CheckForUpdates, ( void * )update_info, 0, NULL ) );
 		}
 	}
@@ -873,23 +869,6 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 
 			// Automatically save our call log and lists after 12 hours.
 			_SetTimer( hWnd, IDT_SAVE_TIMER, 43200000, ( TIMERPROC )SaveTimerProc );
-
-
-
-
-/*
-displayinfo *di = ( displayinfo * )GlobalAlloc( GPTR, sizeof( displayinfo ) );
-di->caller_id = GlobalStrDupW( L"CALLER" );
-di->phone_number = GlobalStrDupW( L"5550001111" );
-di->ci.caller_id = GlobalStrDupA( "CALLER" );
-di->ci.call_from = GlobalStrDupA( "5550001111" );
-di->contact_info = ( contactinfo * )GlobalAlloc( GPTR, sizeof( contactinfo ) );
-//di->contact_info->picture_path = GlobalStrDupW( L"C:\\Users\\User\\Desktop\\VZ_Enhanced_56K\\Debug\\pictures\\152785.jpg" );
-//di->contact_info->picture_path = GlobalStrDupW( L"C:\\ProgramData\\Microsoft\\User Account Pictures\\User.bmp" );
-//CreatePopup( di );
-CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_call_log, ( void * )di, 0, NULL ) );
-*/
-
 
 			return 0;
 		}
@@ -1870,11 +1849,7 @@ CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_call_log, ( void * )di, 0,
 						{
 							g_hWnd_update = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"update", ST_Checking_For_Updates___, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 510 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 240 ) / 2 ), 510, 240, NULL, NULL, NULL, NULL );
 
-							UPDATE_CHECK_INFO *update_info = ( UPDATE_CHECK_INFO * )GlobalAlloc( GMEM_FIXED, sizeof( UPDATE_CHECK_INFO ) );
-							update_info->notes = NULL;
-							update_info->download_url = NULL;
-							update_info->version = 0;
-							update_info->got_update = false;
+							UPDATE_CHECK_INFO *update_info = ( UPDATE_CHECK_INFO * )GlobalAlloc( GPTR, sizeof( UPDATE_CHECK_INFO ) );
 							CloseHandle( ( HANDLE )_CreateThread( NULL, 0, CheckForUpdates, ( void * )update_info, 0, NULL ) );
 						}
 
@@ -1887,9 +1862,9 @@ CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_call_log, ( void * )di, 0,
 					{
 						wchar_t msg[ 512 ];
 						__snwprintf( msg, 512, L"VZ Enhanced 56K is made free under the GPLv3 license.\r\n\r\n" \
-											   L"Version 1.0.0.0\r\n\r\n" \
+											   L"Version 1.0.0.1\r\n\r\n" \
 											   L"Built on %s, %s %d, %04d %d:%02d:%02d %s (UTC)\r\n\r\n" \
-											   L"Copyright \xA9 2013-2017 Eric Kutcher", GetDay( g_compile_time.wDayOfWeek ), GetMonth( g_compile_time.wMonth ), g_compile_time.wDay, g_compile_time.wYear, ( g_compile_time.wHour > 12 ? g_compile_time.wHour - 12 : ( g_compile_time.wHour != 0 ? g_compile_time.wHour : 12 ) ), g_compile_time.wMinute, g_compile_time.wSecond, ( g_compile_time.wHour >= 12 ? L"PM" : L"AM" ) );
+											   L"Copyright \xA9 2013-2018 Eric Kutcher", GetDay( g_compile_time.wDayOfWeek ), GetMonth( g_compile_time.wMonth ), g_compile_time.wDay, g_compile_time.wYear, ( g_compile_time.wHour > 12 ? g_compile_time.wHour - 12 : ( g_compile_time.wHour != 0 ? g_compile_time.wHour : 12 ) ), g_compile_time.wMinute, g_compile_time.wSecond, ( g_compile_time.wHour >= 12 ? L"PM" : L"AM" ) );
 
 						_MessageBoxW( hWnd, msg, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONINFORMATION );
 					}

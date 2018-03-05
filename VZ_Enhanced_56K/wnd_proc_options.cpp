@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2017 Eric Kutcher
+	Copyright (C) 2013-2018 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -244,7 +244,10 @@ void create_settings()
 	shared_settings->popup_background_color2 = cfg_popup_background_color2;
 	shared_settings->popup_gradient = cfg_popup_gradient;
 	shared_settings->popup_gradient_direction = cfg_popup_gradient_direction;
-	shared_settings->ringtone_info = ( cfg_popup_enable_ringtones ? default_ringtone : NULL );
+	if ( cfg_popup_enable_ringtones )
+	{
+		shared_settings->ringtone_info = default_ringtone;
+	}
 
 	LOGFONT lf;
 	_memzero( &lf, sizeof( LOGFONT ) );
@@ -2817,13 +2820,6 @@ LRESULT CALLBACK PopupTabWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 				}
 				break;
 
-				case BTN_CONTACT_PICTURE:
-				{
-					options_state_changed = true;
-					_EnableWindow( g_hWnd_apply, TRUE );
-				}
-				break;
-
 				case BTN_ENABLE_RINGTONES:
 				{
 					if ( g_ll != NULL && g_ll->data != NULL && ( ( POPUP_SETTINGS * )g_ll->data )->shared_settings != NULL )
@@ -2955,6 +2951,7 @@ LRESULT CALLBACK PopupTabWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 				}
 				break;
 
+				case BTN_CONTACT_PICTURE:
 				case BTN_BORDER:
 				{
 					options_state_changed = true;

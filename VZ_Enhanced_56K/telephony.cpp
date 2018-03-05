@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2017 Eric Kutcher
+	Copyright (C) 2013-2018 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -164,10 +164,10 @@ void HandleIncomingCallerID( HCALL call, LINECALLINFO *lci )
 	_lineGetCallInfoA( call, lci );
 
 	// Use caller ID name/number pairs of the following.
-	if ( ( ( ( lci->dwCallerIDFlags & LINECALLPARTYID_NAME )	  && ( lci->dwCallerIDFlags & LINECALLPARTYID_ADDRESS ) ) ||
-		   ( ( lci->dwCallerIDFlags & LINECALLPARTYID_OUTOFAREA ) && ( lci->dwCallerIDFlags & LINECALLPARTYID_ADDRESS ) ) ||
-			 ( lci->dwCallerIDFlags & LINECALLPARTYID_UNAVAIL ) ||
-			 ( lci->dwCallerIDFlags & LINECALLPARTYID_BLOCKED ) ) )
+	if ( ( ( lci->dwCallerIDFlags & LINECALLPARTYID_NAME ) && ( lci->dwCallerIDFlags & LINECALLPARTYID_ADDRESS ) ) ||
+		   ( lci->dwCallerIDFlags & LINECALLPARTYID_BLOCKED ) ||
+		   ( lci->dwCallerIDFlags & LINECALLPARTYID_OUTOFAREA ) ||
+		   ( lci->dwCallerIDFlags & LINECALLPARTYID_UNAVAIL ) )
 	{
 		incomingcallinfo *ici = NULL;
 		bool process_incoming_call = false;
@@ -201,25 +201,39 @@ void HandleIncomingCallerID( HCALL call, LINECALLINFO *lci )
 
 			displayinfo *di = ( displayinfo * )GlobalAlloc( GPTR, sizeof( displayinfo ) );
 
-			if ( lci->dwCallerIDFlags & LINECALLPARTYID_UNAVAIL )
+			// I don't see why this can't show up for BLOCKED, OUTOFAREA, and UNAVAIL.
+			if ( lci->dwCallerIDFlags & LINECALLPARTYID_ADDRESS )
 			{
-				di->ci.caller_id = GlobalStrDupA( "Unavailable" );
-				di->ci.call_from = GlobalStrDupA( "Unavailable" );
+				di->ci.call_from = GlobalStrDupA( ( char * )lci + lci->dwCallerIDOffset );
+			}
+
+			if ( lci->dwCallerIDFlags & LINECALLPARTYID_NAME )
+			{
+				di->ci.caller_id = GlobalStrDupA( ( char * )lci + lci->dwCallerIDNameOffset );
 			}
 			else if ( lci->dwCallerIDFlags & LINECALLPARTYID_BLOCKED )
 			{
 				di->ci.caller_id = GlobalStrDupA( "PRIVATE" );
-				di->ci.call_from = GlobalStrDupA( "PRIVATE" );
+				if ( di->ci.call_from == NULL )
+				{
+					di->ci.call_from = GlobalStrDupA( "PRIVATE" );
+				}
 			}
-			else if ( ( lci->dwCallerIDFlags & LINECALLPARTYID_OUTOFAREA ) && ( lci->dwCallerIDFlags & LINECALLPARTYID_ADDRESS ) )
+			else if ( lci->dwCallerIDFlags & LINECALLPARTYID_OUTOFAREA )
 			{
 				di->ci.caller_id = GlobalStrDupA( "Out of Area" );
-				di->ci.call_from = GlobalStrDupA( ( char * )lci + lci->dwCallerIDOffset );
+				if ( di->ci.call_from == NULL )
+				{
+					di->ci.call_from = GlobalStrDupA( "Out of Area" );
+				}
 			}
-			else
+			else// if ( lci->dwCallerIDFlags & LINECALLPARTYID_UNAVAIL )
 			{
-				di->ci.caller_id = GlobalStrDupA( ( char * )lci + lci->dwCallerIDNameOffset );
-				di->ci.call_from = GlobalStrDupA( ( char * )lci + lci->dwCallerIDOffset );
+				di->ci.caller_id = GlobalStrDupA( "Unavailable" );
+				if ( di->ci.call_from == NULL )
+				{
+					di->ci.call_from = GlobalStrDupA( "Unavailable" );
+				}
 			}
 
 			di->time.LowPart = FileTime.dwLowDateTime;
