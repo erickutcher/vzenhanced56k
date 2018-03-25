@@ -202,14 +202,23 @@ void HandleIncomingCallerID( HCALL call, LINECALLINFO *lci )
 			displayinfo *di = ( displayinfo * )GlobalAlloc( GPTR, sizeof( displayinfo ) );
 
 			// I don't see why this can't show up for BLOCKED, OUTOFAREA, and UNAVAIL.
-			if ( lci->dwCallerIDFlags & LINECALLPARTYID_ADDRESS )
+			if ( ( lci->dwCallerIDFlags & LINECALLPARTYID_ADDRESS ) && lci->dwCallerIDSize > 1 )	// Ignore the empty string if that's all we get.
 			{
-				di->ci.call_from = GlobalStrDupA( ( char * )lci + lci->dwCallerIDOffset );
+				di->ci.call_from = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * lci->dwCallerIDSize );
+				_memcpy_s( di->ci.call_from, sizeof( char ) * lci->dwCallerIDSize, ( char * )lci + lci->dwCallerIDOffset, sizeof( char ) * lci->dwCallerIDSize );
+				di->ci.call_from[ lci->dwCallerIDSize - 1 ] = 0;	// Sanity.
 			}
 
-			if ( lci->dwCallerIDFlags & LINECALLPARTYID_NAME )
+			if ( ( lci->dwCallerIDFlags & LINECALLPARTYID_NAME ) && lci->dwCallerIDNameSize > 1 )	// Ignore the empty string if that's all we get.
 			{
-				di->ci.caller_id = GlobalStrDupA( ( char * )lci + lci->dwCallerIDNameOffset );
+				di->ci.caller_id = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * lci->dwCallerIDNameSize );
+				_memcpy_s( di->ci.caller_id, sizeof( char ) * lci->dwCallerIDNameSize, ( char * )lci + lci->dwCallerIDNameOffset, sizeof( char ) * lci->dwCallerIDNameSize );
+				di->ci.caller_id[ lci->dwCallerIDNameSize - 1 ] = 0;	// Sanity.
+
+				if ( di->ci.call_from == NULL )
+				{
+					di->ci.call_from = GlobalStrDupA( "Unavailable" );
+				}
 			}
 			else if ( lci->dwCallerIDFlags & LINECALLPARTYID_BLOCKED )
 			{
