@@ -37,6 +37,9 @@
 	plineGetIDW			_lineGetIDW;
 	plineGetDevConfigW	_lineGetDevConfigW;
 
+	//plineSetAppPriorityW	_lineSetAppPriorityW;
+	plineSetCallPrivilege	_lineSetCallPrivilege;
+
 	HMODULE hModule_tapi32 = NULL;
 
 	unsigned char tapi32_state = 0;	// 0 = Not running, 1 = running.
@@ -70,6 +73,9 @@
 
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_tapi32, ( void ** )&_lineGetIDW, "lineGetIDW" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_tapi32, ( void ** )&_lineGetDevConfigW, "lineGetDevConfigW" ) )
+
+		//VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_tapi32, ( void ** )&_lineSetAppPriorityW, "lineSetAppPriorityW" ) )
+		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_tapi32, ( void ** )&_lineSetCallPrivilege, "lineSetCallPrivilege" ) )
 
 		tapi32_state = TAPI32_STATE_RUNNING;
 

@@ -280,6 +280,9 @@ void IgnoreIncomingCall( HCALL call )
 					{
 						ici->state = 2;	// Answered.
 
+						// Ensure that we have the ability to answer and drop the call if other TAPI programs have ownership of the line.
+						_lineSetCallPrivilege( ici->incoming_call, LINECALLPRIVILEGE_OWNER );
+
 						// Answer the call.
 						LONG ret = _lineAnswer( ici->incoming_call, NULL, 0 );
 
@@ -492,6 +495,14 @@ bool InitializeTelephony()
 	InitializeCriticalSection( &acc_cs );
 
 	MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Initializing_telephony_interface )
+
+	/*wchar_t app_path[ MAX_PATH ];
+	GetModuleFileNameW( NULL, app_path, MAX_PATH );
+	LONG ret = _lineSetAppPriorityW( app_path, LINEMEDIAMODE_AUTOMATEDVOICE | LINEMEDIAMODE_DATAMODEM, 0, 0, 0, 1 );
+	if ( ret != 0 )
+	{
+		_lineSetAppPriorityW( app_path, LINEMEDIAMODE_DATAMODEM, 0, 0, 0, 1 );
+	}*/
 
 	if ( _lineInitializeExW( &ghLineApp, ( HINSTANCE )NULL, ( LINECALLBACK )NULL, PROGRAM_CAPTION, &gNumDevs, &gAPIVersion, &hLineInitParams ) != 0 )
 	{
@@ -806,6 +817,23 @@ MESSAGE_LOG_OUTPUT( ML_NOTICE, L"Killing accepted call thread while DISCONNECTED
 				}
 			}
 			break;
+/*
+			// We can get the HCALL here with lm.dwParam2
+			// lm.dwParam3 will tell us our privilege state.
+			case LINE_APPNEWCALL:
+			{
+/////////////////////////////////////
+#ifdef USE_DEBUG_DIRECTORY
+/////////////////////////////////////
+
+MESSAGE_LOG_OUTPUT( ML_NOTICE, L"New call handle created." )
+
+/////////////////////////////////////
+#endif
+/////////////////////////////////////
+			}
+			break;
+*/
 		}
 	}
 

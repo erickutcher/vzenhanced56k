@@ -47,6 +47,9 @@
 	#define _lineGetIDW			lineGetIDW
 	#define _lineGetDevConfigW	lineGetDevConfigW
 
+	//#define _lineSetAppPriorityW	lineSetAppPriorityW
+	#define _lineSetCallPrivilege	lineSetCallPrivilege
+
 #else
 
 	#define TAPI32_STATE_SHUTDOWN	0
@@ -68,6 +71,9 @@
 	typedef LONG ( WINAPI *plineGetIDW )( HLINE hLine, DWORD dwAddressID, HCALL hCall, DWORD dwSelect, LPVARSTRING lpDeviceID, LPCWSTR lpszDeviceClass );
 	typedef LONG ( WINAPI *plineGetDevConfigW )( DWORD dwDeviceID, LPVARSTRING lpDeviceConfig, LPCWSTR lpszDeviceClass );
 
+	//typedef LONG ( WINAPI *plineSetAppPriorityW )( LPCWSTR lpszAppFilename, DWORD dwMediaMode, LPLINEEXTENSIONID lpExtensionID, DWORD dwRequestMode, LPCWSTR lpszExtensionName, DWORD dwPriority );
+	typedef LONG ( WINAPI *plineSetCallPrivilege )( HCALL hCall, DWORD dwCallPrivilege );
+
 	extern plineInitializeExW	_lineInitializeExW;
 	extern plineNegotiateAPIVersion _lineNegotiateAPIVersion;
 	extern plineGetDevCapsW		_lineGetDevCapsW;
@@ -83,6 +89,9 @@
 
 	extern plineGetIDW			_lineGetIDW;
 	extern plineGetDevConfigW	_lineGetDevConfigW;
+
+	//extern plineSetAppPriorityW	_lineSetAppPriorityW;
+	extern plineSetCallPrivilege	_lineSetCallPrivilege;
 
 	extern unsigned char tapi32_state;
 
