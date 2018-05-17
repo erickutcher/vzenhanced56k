@@ -252,7 +252,18 @@ void HandleIncomingCallerID( HCALL call, LINECALLINFO *lci )
 			di->incoming_call = ici->incoming_call;	// Save the incoming call handle so that we can ignore it later if we need to.
 
 			// This will also ignore the call if it's in our lists.
-			CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_call_log, ( void * )di, 0, NULL ) );
+			HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_call_log, ( void * )di, 0, NULL );
+			if ( thread != NULL )
+			{
+				CloseHandle( thread );
+			}
+			else
+			{
+				// This is all that's set above.
+				GlobalFree( di->ci.call_from );
+				GlobalFree( di->ci.caller_id );
+				GlobalFree( di );
+			}
 		}
 
 		LeaveCriticalSection( &ac_cs );

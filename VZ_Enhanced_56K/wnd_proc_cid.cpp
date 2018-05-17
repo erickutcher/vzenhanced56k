@@ -218,7 +218,16 @@ LRESULT CALLBACK CIDWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 						}
 
 						// icidui is freed in the update_ignore_cid_list thread.
-						CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_ignore_cid_list, ( void * )icidui, 0, NULL ) );
+						HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_cid_list, ( void * )icidui, 0, NULL );
+						if ( thread != NULL )
+						{
+							CloseHandle( thread );
+						}
+						else
+						{
+							GlobalFree( icidui->caller_id );
+							GlobalFree( icidui );
+						}
 					}
 
 					_SendMessageW( hWnd, WM_CLOSE, 0, 0 );

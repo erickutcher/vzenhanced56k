@@ -310,7 +310,16 @@ LRESULT CALLBACK PhoneWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 						iui->phone_number = ignore_number;
 
 						// Add items. iui is freed in the update_ignore_list thread.
-						CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL ) );
+						HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL );
+						if ( thread != NULL )
+						{
+							CloseHandle( thread );
+						}
+						else
+						{
+							GlobalFree( iui->phone_number );
+							GlobalFree( iui );
+						}
 					}
 
 					_SendMessageW( hWnd, WM_CLOSE, 0, 0 );

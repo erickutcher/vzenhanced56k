@@ -163,7 +163,15 @@ LRESULT CALLBACK MessageLogWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 					if ( _GetSaveFileNameW( &ofn ) )
 					{
 						// file_path will be freed in the create_message_log_csv_file thread.
-						CloseHandle( ( HANDLE )_CreateThread( NULL, 0, create_message_log_csv_file, ( void * )file_path, 0, NULL ) );
+						HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, create_message_log_csv_file, ( void * )file_path, 0, NULL );
+						if ( thread != NULL )
+						{
+							CloseHandle( thread );
+						}
+						else
+						{
+							GlobalFree( file_path );
+						}
 					}
 					else
 					{

@@ -33,7 +33,7 @@
 #define DEFAULT_PORT		80
 #define DEFAULT_PORT_SECURE	443
 
-#define CURRENT_VERSION		1003
+#define CURRENT_VERSION		1004
 #define VERSION_URL			"https://sites.google.com/site/vzenhanced/version_56k.txt"
 
 CRITICAL_SECTION cut_cs;			// Queues additional update check threads.

@@ -903,12 +903,15 @@ THREAD_RETURN update_ignore_list( void *pArguments )
 				ri->hWnd = g_hWnd_ignore_list;
 
 				// ri will be freed in the remove_items thread.
-				HANDLE hThread = ( HANDLE )_CreateThread( NULL, 0, remove_items, ( void * )ri, 0, NULL );
-
-				if ( hThread != NULL )
+				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, remove_items, ( void * )ri, 0, NULL );
+				if ( thread != NULL )
 				{
-					WaitForSingleObject( hThread, INFINITE );	// Wait for the remove_items thread to finish.
-					CloseHandle( hThread );
+					WaitForSingleObject( thread, INFINITE );	// Wait for the remove_items thread to finish.
+					CloseHandle( thread );
+				}
+				else
+				{
+					GlobalFree( ri );
 				}
 			}
 			else if ( iui->action == 2 )	// Add all items in the ignore_list to the ignore list listview.
@@ -1254,12 +1257,15 @@ THREAD_RETURN update_ignore_cid_list( void *pArguments )
 				ri->hWnd = g_hWnd_ignore_cid_list;
 
 				// ri will be freed in the remove_items thread.
-				HANDLE hThread = ( HANDLE )_CreateThread( NULL, 0, remove_items, ( void * )ri, 0, NULL );
-
-				if ( hThread != NULL )
+				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, remove_items, ( void * )ri, 0, NULL );
+				if ( thread != NULL )
 				{
-					WaitForSingleObject( hThread, INFINITE );	// Wait for the remove_items thread to finish.
-					CloseHandle( hThread );
+					WaitForSingleObject( thread, INFINITE );	// Wait for the remove_items thread to finish.
+					CloseHandle( thread );
+				}
+				else
+				{
+					GlobalFree( ri );
 				}
 			}
 			else if ( icidui->action == 2 )	// Add all items in the ignore_cid_list to the ignore cid list listview.
@@ -1798,12 +1804,15 @@ THREAD_RETURN update_contact_list( void *pArguments )
 			ri->hWnd = g_hWnd_contact_list;
 
 			// ri will be freed in the remove_items thread.
-			HANDLE hThread = ( HANDLE )_CreateThread( NULL, 0, remove_items, ( void * )ri, 0, NULL );
-
-			if ( hThread != NULL )
+			HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, remove_items, ( void * )ri, 0, NULL );
+			if ( thread != NULL )
 			{
-				WaitForSingleObject( hThread, INFINITE );	// Wait for the remove_items thread to finish.
-				CloseHandle( hThread );
+				WaitForSingleObject( thread, INFINITE );	// Wait for the remove_items thread to finish.
+				CloseHandle( thread );
+			}
+			else
+			{
+				GlobalFree( ri );
 			}
 		}
 		else if ( cui->action == 2 )	// Add all items in the contact_list to the contact list listview.
@@ -2097,7 +2106,15 @@ THREAD_RETURN update_call_log( void *pArguments )
 			iui->hWnd = g_hWnd_ignore_list;
 
 			// iui is freed in the update_ignore_list thread.
-//			CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL ) );
+			HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL );
+			if ( thread != NULL )
+			{
+				CloseHandle( thread );
+			}
+			else
+			{
+				GlobalFree( iui );
+			}
 		}
 		else
 		{
@@ -2119,7 +2136,15 @@ THREAD_RETURN update_call_log( void *pArguments )
 				icidui->match_whole_word = false;
 
 				// icidui is freed in the update_ignore_cid_list thread.
-//				CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_ignore_cid_list, ( void * )icidui, 0, NULL ) );
+				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_cid_list, ( void * )icidui, 0, NULL );
+				if ( thread != NULL )
+				{
+					CloseHandle( thread );
+				}
+				else
+				{
+					GlobalFree( icidui );
+				}
 			}
 		}
 

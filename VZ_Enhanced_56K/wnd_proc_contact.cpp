@@ -725,7 +725,16 @@ LRESULT CALLBACK ContactWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
 							cui->remove_picture = remove_picture;
 
 							// Update this contact.
-							CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_contact_list, ( void * )cui, 0, NULL ) );
+							HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_contact_list, ( void * )cui, 0, NULL );
+							if ( thread != NULL )
+							{
+								CloseHandle( thread );
+							}
+							else
+							{
+								free_contactinfo( &ci );
+								GlobalFree( cui );
+							}
 						}
 						else
 						{
@@ -742,7 +751,16 @@ LRESULT CALLBACK ContactWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
 						cui->remove_picture = false;
 
 						// Add the contact to the listview. The only values this creates are the wide character phone values. Everything else will have been set.
-						CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_contact_list, ( void * )cui, 0, NULL ) );
+						HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_contact_list, ( void * )cui, 0, NULL );
+						if ( thread != NULL )
+						{
+							CloseHandle( thread );
+						}
+						else
+						{
+							free_contactinfo( &ci );
+							GlobalFree( cui );
+						}
 					}
 
 					_SendMessageW( hWnd, WM_CLOSE, 0, 0 );

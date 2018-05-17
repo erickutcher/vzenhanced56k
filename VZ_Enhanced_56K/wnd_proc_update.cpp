@@ -20,6 +20,7 @@
 #include "string_tables.h"
 #include "connection.h"
 #include "lite_ole32.h"
+#include "message_log_utilities.h"
 
 #define BTN_UPDATE_DOWNLOAD		1000
 #define BTN_UPDATE_CANCEL		1001
@@ -67,7 +68,7 @@ LRESULT CALLBACK UpdateWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 
 			_DeferWindowPos( hdwp, g_hWnd_download_cancel, HWND_TOP, rc.right - 90, rc.bottom - 32, 80, 23, SWP_NOZORDER );
 			_DeferWindowPos( hdwp, g_hWnd_download_update, HWND_TOP, rc.right - 205, rc.bottom - 32, 110, 23, SWP_NOZORDER );
-			_DeferWindowPos( hdwp, g_hWnd_static_update_info, HWND_TOP, 10, rc.bottom - 29, 190, 20, SWP_NOZORDER );
+			_DeferWindowPos( hdwp, g_hWnd_static_update_info, HWND_TOP, 10, rc.bottom - 27, 190, 20, SWP_NOZORDER );
 			_DeferWindowPos( hdwp, g_hWnd_edit_update_info, HWND_TOP, 10, 10, rc.right - 20, rc.bottom - 52, SWP_NOZORDER );
 
 			_EndDeferWindowPos( hdwp );
@@ -114,7 +115,24 @@ LRESULT CALLBACK UpdateWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 					_EnableWindow( g_hWnd_download_update, FALSE );
 
 					// g_update_check_info is freed in CheckForUpdates.
-					CloseHandle( ( HANDLE )_CreateThread( NULL, 0, CheckForUpdates, ( void * )g_update_check_info, 0, NULL ) );
+					HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, CheckForUpdates, ( void * )g_update_check_info, 0, NULL );
+					if ( thread != NULL )
+					{
+						CloseHandle( thread );
+					}
+					else
+					{
+						MESSAGE_LOG_OUTPUT( ML_WARNING, ST_The_download_has_failed_ )
+
+						_SendMessageW( hWnd, WM_ALERT, 1, NULL );
+
+						if ( g_update_check_info != NULL )
+						{
+							GlobalFree( g_update_check_info->notes );
+							GlobalFree( g_update_check_info->download_url );
+							GlobalFree( g_update_check_info );
+						}
+					}
 
 					g_update_check_info = NULL;
 				}

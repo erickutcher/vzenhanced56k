@@ -87,7 +87,15 @@ VOID CALLBACK UpdateTimerProc( HWND hWnd, UINT msg, UINT idTimer, DWORD dwTime )
 			update_check_state = 2;	// Automatic update check.
 
 			UPDATE_CHECK_INFO *update_info = ( UPDATE_CHECK_INFO * )GlobalAlloc( GPTR, sizeof( UPDATE_CHECK_INFO ) );
-			CloseHandle( ( HANDLE )_CreateThread( NULL, 0, CheckForUpdates, ( void * )update_info, 0, NULL ) );
+			HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, CheckForUpdates, ( void * )update_info, 0, NULL );
+			if ( thread != NULL )
+			{
+				CloseHandle( thread );
+			}
+			else
+			{
+				GlobalFree( update_info );
+			}
 		}
 	}
 
@@ -325,7 +333,16 @@ LRESULT CALLBACK ListsSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 			if ( iei->file_paths != NULL )
 			{
 				// iei will be freed in the import_list thread.
-				CloseHandle( ( HANDLE )_CreateThread( NULL, 0, import_list, ( void * )iei, 0, NULL ) );
+				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, import_list, ( void * )iei, 0, NULL );
+				if ( thread != NULL )
+				{
+					CloseHandle( thread );
+				}
+				else
+				{
+					GlobalFree( iei->file_paths );
+					GlobalFree( iei );
+				}
 			}
 			else	// No files were dropped.
 			{
@@ -820,6 +837,8 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 				_Shell_NotifyIconW( NIM_ADD, &g_nid );
 			}
 
+			HANDLE thread = NULL;
+
 			if ( cfg_enable_call_log_history )
 			{
 				importexportinfo *iei = ( importexportinfo * )GlobalAlloc( GMEM_FIXED, sizeof( importexportinfo ) );
@@ -833,7 +852,16 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 				iei->file_type = LOAD_CALL_LOG_HISTORY;
 
 				// iei will be freed in the import_list thread.
-				CloseHandle( ( HANDLE )_CreateThread( NULL, 0, import_list, ( void * )iei, 0, NULL ) );
+				thread = ( HANDLE )_CreateThread( NULL, 0, import_list, ( void * )iei, 0, NULL );
+				if ( thread != NULL )
+				{
+					CloseHandle( thread );
+				}
+				else
+				{
+					GlobalFree( iei->file_paths );
+					GlobalFree( iei );
+				}
 			}
 
 			ignoreupdateinfo *iui = ( ignoreupdateinfo * )GlobalAlloc( GMEM_FIXED, sizeof( ignoreupdateinfo ) );
@@ -843,7 +871,15 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 			iui->hWnd = g_hWnd_ignore_list;
 
 			// iui is freed in the update_ignore_list thread.
-			CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL ) );
+			thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL );
+			if ( thread != NULL )
+			{
+				CloseHandle( thread );
+			}
+			else
+			{
+				GlobalFree( iui );
+			}
 
 			ignorecidupdateinfo *icidui = ( ignorecidupdateinfo * )GlobalAlloc( GMEM_FIXED, sizeof( ignorecidupdateinfo ) );
 			icidui->icidi = NULL;
@@ -854,12 +890,28 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 			icidui->match_whole_word = false;
 
 			// icidui is freed in the update_ignore_cid_list thread.
-			CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_ignore_cid_list, ( void * )icidui, 0, NULL ) );
+			thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_cid_list, ( void * )icidui, 0, NULL );
+			if ( thread != NULL )
+			{
+				CloseHandle( thread );
+			}
+			else
+			{
+				GlobalFree( icidui );
+			}
 
 			contactupdateinfo *cui = ( contactupdateinfo * )GlobalAlloc( GPTR, sizeof( contactupdateinfo ) );
 			cui->action = 2;
 						
-			CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_contact_list, ( void * )cui, 0, NULL ) );
+			thread = ( HANDLE )_CreateThread( NULL, 0, update_contact_list, ( void * )cui, 0, NULL );
+			if ( thread != NULL )
+			{
+				CloseHandle( thread );
+			}
+			else
+			{
+				GlobalFree( cui );
+			}
 
 			if ( cfg_check_for_updates )
 			{
@@ -1191,7 +1243,15 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 							ci->hWnd = c_hWnd;
 
 							// ci is freed in the copy items thread.
-							CloseHandle( ( HANDLE )_CreateThread( NULL, 0, copy_items, ( void * )ci, 0, NULL ) );
+							HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, copy_items, ( void * )ci, 0, NULL );
+							if ( thread != NULL )
+							{
+								CloseHandle( thread );
+							}
+							else
+							{
+								GlobalFree( ci );
+							}
 						}
 					}
 					break;
@@ -1210,7 +1270,15 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 									ri->hWnd = g_hWnd_call_log;
 
 									// ri will be freed in the remove_items thread.
-									CloseHandle( ( HANDLE )_CreateThread( NULL, 0, remove_items, ( void * )ri, 0, NULL ) );
+									HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, remove_items, ( void * )ri, 0, NULL );
+									if ( thread != NULL )
+									{
+										CloseHandle( thread );
+									}
+									else
+									{
+										GlobalFree( ri );
+									}
 								}
 							}
 							else if ( c_hWnd == g_hWnd_contact_list )
@@ -1229,7 +1297,15 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 										cui->action = 1;	// 1 = Remove, 0 = Add
 
 										// cui is freed in the update_contact_list thread.
-										CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_contact_list, ( void * )cui, 0, NULL ) );
+										HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_contact_list, ( void * )cui, 0, NULL );
+										if ( thread != NULL )
+										{
+											CloseHandle( thread );
+										}
+										else
+										{
+											GlobalFree( cui );
+										}
 									}
 								}
 							}
@@ -1252,7 +1328,15 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 										iui->hWnd = g_hWnd_ignore_list;
 
 										// iui is freed in the update_ignore_list thread.
-										CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL ) );
+										HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL );
+										if ( thread != NULL )
+										{
+											CloseHandle( thread );
+										}
+										else
+										{
+											GlobalFree( iui );
+										}
 									}
 								}
 							}
@@ -1277,7 +1361,15 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 										icidui->hWnd = g_hWnd_ignore_cid_list;
 
 										// icidui is freed in the update_ignore_cid_list thread.
-										CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_ignore_cid_list, ( void * )icidui, 0, NULL ) );
+										HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_cid_list, ( void * )icidui, 0, NULL );
+										if ( thread != NULL )
+										{
+											CloseHandle( thread );
+										}
+										else
+										{
+											GlobalFree( icidui );
+										}
 									}
 								}
 							}
@@ -1543,7 +1635,15 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 										iui->hWnd = g_hWnd_call_log;
 
 										// iui is freed in the update_ignore_list thread.
-										CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL ) );
+										HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL );
+										if ( thread != NULL )
+										{
+											CloseHandle( thread );
+										}
+										else
+										{
+											GlobalFree( iui );
+										}
 									}
 								}
 								else	// Add items to the ignore list.
@@ -1555,7 +1655,15 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 									iui->hWnd = g_hWnd_call_log;
 
 									// iui is freed in the update_ignore_list thread.
-									CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL ) );
+									HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL );
+									if ( thread != NULL )
+									{
+										CloseHandle( thread );
+									}
+									else
+									{
+										GlobalFree( iui );
+									}
 								}
 							}
 							else if ( LOWORD( wParam ) == MENU_IGNORE_CID_LIST )
@@ -1574,7 +1682,15 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 										icidui->hWnd = g_hWnd_call_log;
 
 										// Remove items.
-										CloseHandle( ( HANDLE )_CreateThread( NULL, 0, update_ignore_cid_list, ( void * )icidui, 0, NULL ) );
+										HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_cid_list, ( void * )icidui, 0, NULL );
+										if ( thread != NULL )
+										{
+											CloseHandle( thread );
+										}
+										else
+										{
+											GlobalFree( icidui );
+										}
 									}
 								}
 								else	// The item we've selected is not in the ignorecidlist tree. Prompt the user.
@@ -1688,7 +1804,15 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 						if ( _GetSaveFileNameW( &ofn ) )
 						{
 							// file_path will be freed in the create_call_log_csv_file thread.
-							CloseHandle( ( HANDLE )_CreateThread( NULL, 0, create_call_log_csv_file, ( void * )file_path, 0, NULL ) );
+							HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, create_call_log_csv_file, ( void * )file_path, 0, NULL );
+							if ( thread != NULL )
+							{
+								CloseHandle( thread );
+							}
+							else
+							{
+								GlobalFree( file_path );
+							}
 						}
 						else
 						{
@@ -1753,7 +1877,16 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 							iei->file_type = ( unsigned char )( 4 - ofn.nFilterIndex );
 
 							// iei will be freed in the export_list thread.
-							CloseHandle( ( HANDLE )_CreateThread( NULL, 0, export_list, ( void * )iei, 0, NULL ) );
+							HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, export_list, ( void * )iei, 0, NULL );
+							if ( thread != NULL )
+							{
+								CloseHandle( thread );
+							}
+							else
+							{
+								GlobalFree( iei->file_paths );
+								GlobalFree( iei );
+							}
 						}
 						else
 						{
@@ -1797,7 +1930,16 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 							iei->file_type = ( unsigned char )( 4 - ofn.nFilterIndex );
 
 							// iei will be freed in the import_list thread.
-							CloseHandle( ( HANDLE )_CreateThread( NULL, 0, import_list, ( void * )iei, 0, NULL ) );
+							HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, import_list, ( void * )iei, 0, NULL );
+							if ( thread != NULL )
+							{
+								CloseHandle( thread );
+							}
+							else
+							{
+								GlobalFree( iei->file_paths );
+								GlobalFree( iei );
+							}
 						}
 						else
 						{
@@ -1850,7 +1992,15 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 							g_hWnd_update = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"update", ST_Checking_For_Updates___, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 510 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 240 ) / 2 ), 510, 240, NULL, NULL, NULL, NULL );
 
 							UPDATE_CHECK_INFO *update_info = ( UPDATE_CHECK_INFO * )GlobalAlloc( GPTR, sizeof( UPDATE_CHECK_INFO ) );
-							CloseHandle( ( HANDLE )_CreateThread( NULL, 0, CheckForUpdates, ( void * )update_info, 0, NULL ) );
+							HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, CheckForUpdates, ( void * )update_info, 0, NULL );
+							if ( thread != NULL )
+							{
+								CloseHandle( thread );
+							}
+							else
+							{
+								GlobalFree( update_info );
+							}
 						}
 
 						_ShowWindow( g_hWnd_update, SW_SHOWNORMAL );
@@ -1862,7 +2012,7 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 					{
 						wchar_t msg[ 512 ];
 						__snwprintf( msg, 512, L"VZ Enhanced 56K is made free under the GPLv3 license.\r\n\r\n" \
-											   L"Version 1.0.0.3\r\n\r\n" \
+											   L"Version 1.0.0.4\r\n\r\n" \
 											   L"Built on %s, %s %d, %04d %d:%02d:%02d %s (UTC)\r\n\r\n" \
 											   L"Copyright \xA9 2013-2018 Eric Kutcher", GetDay( g_compile_time.wDayOfWeek ), GetMonth( g_compile_time.wMonth ), g_compile_time.wDay, g_compile_time.wYear, ( g_compile_time.wHour > 12 ? g_compile_time.wHour - 12 : ( g_compile_time.wHour != 0 ? g_compile_time.wHour : 12 ) ), g_compile_time.wMinute, g_compile_time.wSecond, ( g_compile_time.wHour >= 12 ? L"PM" : L"AM" ) );
 
