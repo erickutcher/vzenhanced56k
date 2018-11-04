@@ -25,7 +25,6 @@
 #include "list_operations.h"
 #include "file_operations.h"
 #include "string_tables.h"
-#include <commdlg.h>
 
 #include "lite_gdi32.h"
 #include "lite_comdlg32.h"
@@ -826,13 +825,13 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 			if ( cfg_tray_icon )
 			{
 				_memzero( &g_nid, sizeof( NOTIFYICONDATA ) );
-				g_nid.cbSize = sizeof( g_nid );
+				g_nid.cbSize = NOTIFYICONDATA_V2_SIZE;	// 5.0 (Windows 2000) and newer.
 				g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 				g_nid.hWnd = hWnd;
 				g_nid.uCallbackMessage = WM_TRAY_NOTIFY;
 				g_nid.uID = 1000;
 				g_nid.hIcon = ( HICON )_LoadImageW( GetModuleHandle( NULL ), MAKEINTRESOURCE( IDI_ICON ), IMAGE_ICON, 16, 16, LR_SHARED );
-				_wmemcpy_s( g_nid.szTip, sizeof( g_nid.szTip ), L"VZ Enhanced 56K\0", 16 );
+				_wmemcpy_s( g_nid.szTip, sizeof( g_nid.szTip ) / sizeof( g_nid.szTip[ 0 ] ), L"VZ Enhanced 56K\0", 16 );
 				g_nid.szTip[ 15 ] = 0;	// Sanity.
 				_Shell_NotifyIconW( NIM_ADD, &g_nid );
 			}
@@ -932,6 +931,46 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 			_SetFocus( GetCurrentListView() );
 
 			return 0;
+		}
+		break;
+
+		case WM_WINDOWPOSCHANGED:
+		{
+			// Only handle main window changes.
+			if ( hWnd == g_hWnd_main )
+			{
+				// Don't want to save minimized and maximized size and position values.
+				if ( _IsIconic( hWnd ) == TRUE )
+				{
+					cfg_min_max = 1;
+				}
+				else if ( _IsZoomed( hWnd ) == TRUE )
+				{
+					cfg_min_max = 2;
+				}
+				else
+				{
+					// This will capture MoveWindow and SetWindowPos changes.
+					WINDOWPOS *wp = ( WINDOWPOS * )lParam;
+
+					if ( !( wp->flags & SWP_NOMOVE ) )
+					{
+						cfg_pos_x = wp->x;
+						cfg_pos_y = wp->y;
+					}
+
+					if ( !( wp->flags & SWP_NOSIZE ) )
+					{
+						cfg_width = wp->cx;
+						cfg_height = wp->cy;
+					}
+
+					cfg_min_max = 0;
+				}
+			}
+
+			// Let it fall through so we can still get the WM_SIZE message.
+			return _DefWindowProcW( hWnd, msg, wParam, lParam );
 		}
 		break;
 
@@ -2012,7 +2051,7 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 					{
 						wchar_t msg[ 512 ];
 						__snwprintf( msg, 512, L"VZ Enhanced 56K is made free under the GPLv3 license.\r\n\r\n" \
-											   L"Version 1.0.0.4\r\n\r\n" \
+											   L"Version 1.0.0.5\r\n\r\n" \
 											   L"Built on %s, %s %d, %04d %d:%02d:%02d %s (UTC)\r\n\r\n" \
 											   L"Copyright \xA9 2013-2018 Eric Kutcher", GetDay( g_compile_time.wDayOfWeek ), GetMonth( g_compile_time.wMonth ), g_compile_time.wDay, g_compile_time.wYear, ( g_compile_time.wHour > 12 ? g_compile_time.wHour - 12 : ( g_compile_time.wHour != 0 ? g_compile_time.wHour : 12 ) ), g_compile_time.wMinute, g_compile_time.wSecond, ( g_compile_time.wHour >= 12 ? L"PM" : L"AM" ) );
 

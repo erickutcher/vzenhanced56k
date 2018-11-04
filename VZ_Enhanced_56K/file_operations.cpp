@@ -173,7 +173,7 @@ char read_config()
 		DWORD read = 0, pos = 0;
 		DWORD fz = GetFileSize( hFile_cfg, NULL );
 
-		int reserved = 1024 - 304;	// There are currently 304 bytes used for settings (not including the strings).
+		int reserved = 1024 - 305;	// There are currently 305 bytes used for settings (not including the strings).
 
 		// Our config file is going to be small. If it's something else, we're not going to read it.
 		// Add 5 for the strings.
@@ -403,7 +403,7 @@ char read_config()
 
 				_memcpy_s( &cfg_popup_gradient, sizeof( bool ), next, sizeof( bool ) );
 				next += sizeof( bool );
-				_memcpy_s( &cfg_popup_gradient_direction, sizeof( bool ), next, sizeof( unsigned char ) );
+				_memcpy_s( &cfg_popup_gradient_direction, sizeof( unsigned char ), next, sizeof( unsigned char ) );
 				next += sizeof( unsigned char );
 				_memcpy_s( &cfg_popup_background_color1, sizeof( COLORREF ), next, sizeof( COLORREF ) );
 				next += sizeof( COLORREF );
@@ -470,10 +470,17 @@ char read_config()
 				next += sizeof( char );
 				_memcpy_s( &cfg_popup_line_order3, sizeof( char ), next, sizeof( char ) );
 				next += sizeof( char );
-				_memcpy_s( &cfg_popup_time_format, sizeof( bool ), next, sizeof( unsigned char ) );
+				_memcpy_s( &cfg_popup_time_format, sizeof( unsigned char ), next, sizeof( unsigned char ) );
 				next += sizeof( unsigned char );
 				_memcpy_s( &cfg_popup_enable_ringtones, sizeof( bool ), next, sizeof( bool ) );
 				next += sizeof( bool );
+
+				//
+
+				_memcpy_s( &cfg_min_max, sizeof( unsigned char ), next, sizeof( unsigned char ) );
+				next += sizeof( unsigned char );
+
+				//
 
 				next += reserved;	// Skip past reserved bytes.
 
@@ -594,8 +601,8 @@ char save_config()
 	HANDLE hFile_cfg = CreateFile( base_directory, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL );
 	if ( hFile_cfg != INVALID_HANDLE_VALUE )
 	{
-		int reserved = 1024 - 304; // There are currently 304 bytes used for settings (not including the strings).
-		int size = ( sizeof( int ) * 51 ) + ( sizeof( bool ) * 19 ) + ( sizeof( char ) * 61 ) + ( sizeof( unsigned short ) * 2 ) + sizeof( GUID ) + reserved;
+		int reserved = 1024 - 305; // There are currently 305 bytes used for settings (not including the strings).
+		int size = ( sizeof( int ) * 51 ) + ( sizeof( bool ) * 19 ) + ( sizeof( char ) * 62 ) + ( sizeof( unsigned short ) * 2 ) + sizeof( GUID ) + reserved;
 		int pos = 0;
 
 		char *write_buf = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * size );
@@ -887,6 +894,13 @@ char save_config()
 		pos += sizeof( unsigned char );
 		_memcpy_s( write_buf + pos, size - pos, &cfg_popup_enable_ringtones, sizeof( bool ) );
 		pos += sizeof( bool );
+
+		//
+
+		_memcpy_s( write_buf + pos, size - pos, &cfg_min_max, sizeof( unsigned char ) );
+		pos += sizeof( unsigned char );
+
+		//
 
 		// Write Reserved bytes.
 		_memzero( write_buf + pos, size - pos );

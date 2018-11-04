@@ -509,7 +509,7 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 
 	if ( !cfg_silent_startup )
 	{
-		_ShowWindow( g_hWnd_main, SW_SHOW );
+		_ShowWindow( g_hWnd_main, ( cfg_min_max == 1 ? SW_MINIMIZE : ( cfg_min_max == 2 ? SW_MAXIMIZE : SW_SHOWNORMAL ) ) );
 	}
 
 	// Main message loop:

@@ -77,6 +77,7 @@
 	#define _IsDialogMessageW		IsDialogMessageW
 	#define _IsIconic				IsIconic
 	#define _IsWindowVisible		IsWindowVisible
+	#define _IsZoomed				IsZoomed
 	#define _KillTimer				KillTimer
 	#define _LoadCursorW			LoadCursorW
 	#define _LoadIconW				LoadIconW
@@ -172,6 +173,7 @@
 	typedef BOOL ( WINAPI *pIsDialogMessageW )( HWND hDlg, LPMSG lpMsg );
 	typedef BOOL ( WINAPI *pIsIconic )( HWND hWnd );
 	typedef BOOL ( WINAPI *pIsWindowVisible )( HWND hWnd );
+	typedef BOOL ( WINAPI *pIsZoomed )( HWND hWnd );
 	typedef BOOL ( WINAPI *pKillTimer )( HWND hWnd, UINT_PTR uIDEvent );
 	typedef HCURSOR ( WINAPI *pLoadCursorW )( HINSTANCE hInstance, LPCTSTR lpCursorName );
 	typedef HICON ( WINAPI *pLoadIconW )( HINSTANCE hInstance, LPCTSTR lpIconName );
@@ -260,6 +262,7 @@
 	extern pIsDialogMessageW		_IsDialogMessageW;
 	extern pIsIconic				_IsIconic;
 	extern pIsWindowVisible			_IsWindowVisible;
+	extern pIsZoomed				_IsZoomed;
 	extern pKillTimer				_KillTimer;
 	extern pLoadCursorW				_LoadCursorW;
 	extern pLoadIconW				_LoadIconW;
@@ -290,7 +293,7 @@
 	extern pSetMenuItemInfoW		_SetMenuItemInfoW;
 	extern pSetRect					_SetRect;
 	extern pSetScrollInfo			_SetScrollInfo;
-	extern pSetScrollPos			_SetScrollPos
+	extern pSetScrollPos			_SetScrollPos;
 	extern pSetTimer				_SetTimer;
 	extern pSetWindowLongW			_SetWindowLongW;
 	extern pSetWindowPos			_SetWindowPos;

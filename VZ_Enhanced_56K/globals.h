@@ -435,6 +435,8 @@ extern int cfg_pos_y;
 extern int cfg_width;
 extern int cfg_height;
 
+extern char cfg_min_max;
+
 extern bool cfg_tray_icon;
 extern bool cfg_close_to_tray;
 extern bool cfg_minimize_to_tray;

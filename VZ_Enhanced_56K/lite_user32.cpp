@@ -69,6 +69,7 @@
 	pIsDialogMessageW		_IsDialogMessageW;
 	pIsIconic				_IsIconic;
 	pIsWindowVisible		_IsWindowVisible;
+	pIsZoomed				_IsZoomed;
 	pKillTimer				_KillTimer;
 	pLoadCursorW			_LoadCursorW;
 	pLoadIconW				_LoadIconW;
@@ -99,7 +100,7 @@
 	pSetMenuItemInfoW		_SetMenuItemInfoW;
 	pSetRect				_SetRect;
 	pSetScrollInfo			_SetScrollInfo;
-	pSetScrollPos			_SetScrollPos
+	pSetScrollPos			_SetScrollPos;
 	pSetTimer				_SetTimer;
 	pSetWindowLongW			_SetWindowLongW;
 	pSetWindowPos			_SetWindowPos;
@@ -175,6 +176,7 @@
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_IsDialogMessageW, "IsDialogMessageW" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_IsIconic, "IsIconic" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_IsWindowVisible, "IsWindowVisible" ) )
+		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_IsZoomed, "IsZoomed" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_KillTimer, "KillTimer" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_LoadCursorW, "LoadCursorW" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_LoadIconW, "LoadIconW" ) )

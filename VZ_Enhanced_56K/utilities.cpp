@@ -43,6 +43,8 @@ int cfg_pos_y = 0;
 int cfg_width = MIN_WIDTH;
 int cfg_height = MIN_HEIGHT;
 
+char cfg_min_max = 0;	// 0 = normal, 1 = minimized, 2 = maximized.
+
 bool cfg_tray_icon = true;
 bool cfg_close_to_tray = false;
 bool cfg_minimize_to_tray = false;

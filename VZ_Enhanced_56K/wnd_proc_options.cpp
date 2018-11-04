@@ -3654,14 +3654,15 @@ LRESULT CALLBACK OptionsWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
 						// Add the tray icon if it was not previously enabled.
 						if ( tray_icon && !cfg_tray_icon )
 						{
-							g_nid.cbSize = sizeof( g_nid );
+							_memzero( &g_nid, sizeof( NOTIFYICONDATA ) );
+							g_nid.cbSize = NOTIFYICONDATA_V2_SIZE;	// 5.0 (Windows 2000) and newer.
 							g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 							g_nid.hWnd = g_hWnd_main;
 							g_nid.uCallbackMessage = WM_TRAY_NOTIFY;
 							g_nid.uID = 1000;
 							g_nid.hIcon = ( HICON )_LoadImageW( GetModuleHandle( NULL ), MAKEINTRESOURCE( IDI_ICON ), IMAGE_ICON, 16, 16, LR_SHARED );
-							_wmemcpy_s( g_nid.szTip, sizeof( g_nid.szTip ), L"VZ Enhanced 56K - Logged Out\0", 29 );
-							g_nid.szTip[ 28 ] = 0;	// Sanity.
+							_wmemcpy_s( g_nid.szTip, sizeof( g_nid.szTip ) / sizeof( g_nid.szTip[ 0 ] ), L"VZ Enhanced 56K\0", 16 );
+							g_nid.szTip[ 15 ] = 0;	// Sanity.
 							_Shell_NotifyIconW( NIM_ADD, &g_nid );
 						}
 						else if ( !tray_icon && cfg_tray_icon )	// Remove the tray icon if it was previously enabled.

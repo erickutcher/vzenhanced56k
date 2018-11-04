@@ -53,8 +53,8 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,4
- PRODUCTVERSION 1,0,0,4
+ FILEVERSION 1,0,0,5
+ PRODUCTVERSION 1,0,0,5
  FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -71,12 +71,12 @@ BEGIN
         BEGIN
             VALUE "Comments", "VZ Enhanced 56K is made free under the GPLv3 license."
             VALUE "FileDescription", "VZ Enhanced 56K is a caller ID notifier that can block phone calls."
-            VALUE "FileVersion", "1, 0, 0, 4"
+            VALUE "FileVersion", "1, 0, 0, 5"
             VALUE "InternalName", "VZ Enhanced 56K"
             VALUE "LegalCopyright", "Copyright © 2013-2018 Eric Kutcher"
             VALUE "OriginalFilename", "VZ_Enhanced_56K.exe"
             VALUE "ProductName", "VZ Enhanced 56K"
-            VALUE "ProductVersion", "1, 0, 0, 4"
+            VALUE "ProductVersion", "1, 0, 0, 5"
         END
     END
     BLOCK "VarFileInfo"
