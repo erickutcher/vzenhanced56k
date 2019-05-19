@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -17,6 +17,7 @@
 */
 
 #include "globals.h"
+#include "lite_pcre2.h"
 #include "list_operations.h"
 #include "file_operations.h"
 #include "utilities.h"
@@ -26,38 +27,34 @@
 
 #include "telephony.h"
 
-bool skip_log_draw = false;				// Prevents WM_DRAWITEM from accessing listview items while we're removing them.
-bool skip_contact_draw = false;
-bool skip_ignore_draw = false;
-bool skip_ignore_cid_draw = false;
+bool skip_list_draw = false;				// Prevents WM_DRAWITEM from accessing listview items while we're removing them.
 
-void update_phone_number_matches( char *phone_number, unsigned char info_type, bool in_range, RANGE **range, bool add_value )
+void update_phone_number_matches( wchar_t *phone_number, unsigned char list_type, bool in_range, RANGE **range, bool add_value )
 {
-	if ( phone_number == NULL || ( info_type != 0 && info_type != 1 ) )
+	if ( phone_number == NULL )
 	{
 		return;
 	}
 
 	if ( !in_range )	// Non-range phone number.
 	{
-		// Update each displayinfo item.
+		// Update each display_info item.
 		DoublyLinkedList *dll = ( DoublyLinkedList * )dllrbt_find( call_log, ( void * )phone_number, true );
 		if ( dll != NULL )
 		{
 			DoublyLinkedList *di_node = dll;
 			while ( di_node != NULL )
 			{
-				displayinfo *mdi = ( displayinfo * )di_node->data;
+				display_info *mdi = ( display_info * )di_node->data;
 				if ( mdi != NULL )
 				{
-					if ( info_type == 0 )	// Handle ignore phone number info.
+					if ( list_type == LIST_TYPE_ALLOW )
 					{
-						if ( mdi->ignore_phone_number != add_value )
-						{
-							mdi->ignore_phone_number = add_value;
-							GlobalFree( mdi->w_ignore_phone_number );
-							mdi->w_ignore_phone_number = GlobalStrDupW( ( add_value ? ST_Yes : ST_No ) );
-						}
+						mdi->allow_phone_number = add_value;
+					}
+					else
+					{
+						mdi->ignore_phone_number = add_value;
 					}
 				}
 
@@ -67,48 +64,57 @@ void update_phone_number_matches( char *phone_number, unsigned char info_type, b
 	}
 	else	// See if the value we're adding is a range (has wildcard values in it).
 	{
-		char range_number[ 32 ];	// Dummy value.
+		wchar_t range_number[ 32 ];	// Dummy value.
 
-		// Update each displayinfo item.
+		// Update each display_info item.
 		node_type *node = dllrbt_get_head( call_log );
 		while ( node != NULL )
 		{
 			DoublyLinkedList *di_node = ( DoublyLinkedList * )node->val;
 			while ( di_node != NULL )
 			{
-				displayinfo *mdi = ( displayinfo * )di_node->data;
+				display_info *mdi = ( display_info * )di_node->data;
 				if ( mdi != NULL )
 				{
-					if ( info_type == 0 )	// Handle ignore phone number info.
+					bool *phone_number_state;
+					dllrbt_tree *list;
+
+					if ( list_type == LIST_TYPE_ALLOW )
 					{
-						// Process display values that will be ignored/no longer ignored.
-						if ( mdi->ignore_phone_number != add_value )
+						phone_number_state = &mdi->allow_phone_number;
+						list = allow_list;
+					}
+					else
+					{
+						phone_number_state = &mdi->ignore_phone_number;
+						list = ignore_list;
+					}
+
+					// Process display values that will be allowed/ignored/no longer allowed/ignored.
+					if ( *phone_number_state != add_value )
+					{
+						// Handle values that are no longer allowed/ignored.
+						if ( !add_value )
 						{
-							// Handle values that are no longer ignored.
-							if ( !add_value )
+							// First, see if the display value falls within another range.
+							if ( range != NULL && RangeSearch( range, mdi->phone_number, range_number ) )
 							{
-								// First, see if the display value falls within another range.
-								if ( range != NULL && RangeSearch( range, mdi->ci.call_from, range_number ) )
-								{
-									// If it does, then we'll skip the display value.
-									break;
-								}
-
-								// Next, see if the display value exists as a non-range value.
-								if ( dllrbt_find( ignore_list, ( void * )mdi->ci.call_from, false ) != NULL )
-								{
-									// If it does, then we'll skip the display value.
-									break;
-								}
+								// If it does, then we'll skip the display value.
+								break;
 							}
 
-							// Finally, see if the display item falls within the range.
-							if ( RangeCompare( phone_number, mdi->ci.call_from ) )
+							// Next, see if the display value exists as a non-range value.
+							if ( dllrbt_find( list, ( void * )mdi->phone_number, false ) != NULL )
 							{
-								mdi->ignore_phone_number = add_value;
-								GlobalFree( mdi->w_ignore_phone_number );
-								mdi->w_ignore_phone_number = GlobalStrDupW( ( add_value ? ST_Yes : ST_No ) );
+								// If it does, then we'll skip the display value.
+								break;
 							}
+						}
+
+						// Finally, see if the display item falls within the range.
+						if ( RangeCompare( phone_number, mdi->phone_number ) )
+						{
+							*phone_number_state = add_value;
 						}
 					}
 				}
@@ -122,66 +128,85 @@ void update_phone_number_matches( char *phone_number, unsigned char info_type, b
 }
 
 // If the caller ID name matches a value in our info structure, then set the state if we're adding or removing it.
-void update_caller_id_name_matches( void *cidi, unsigned char info_type, bool add_value )
+void update_caller_id_name_matches( void *cidi, unsigned char list_type, bool add_value )
 {
 	if ( cidi == NULL )
 	{
 		return;
 	}
 
-	char *caller_id = NULL;
-	bool match_case = true;
-	bool match_whole_word = true;
-	bool *active = NULL;
-
-	if ( info_type == 0 )	// Handle ignore cid info.
-	{
-		caller_id = ( ( ignorecidinfo * )cidi )->c_caller_id;
-		match_case = ( ( ignorecidinfo * )cidi )->match_case;
-		match_whole_word = ( ( ignorecidinfo * )cidi )->match_whole_word;
-		active = &( ( ( ignorecidinfo * )cidi )->active );
-	}
-	else
-	{
-		return;
-	}
+	wchar_t *caller_id = ( ( allow_ignore_cid_info * )cidi )->caller_id;
+	bool match_case = ( ( ( allow_ignore_cid_info * )cidi )->match_flag & 0x02 ? true : false );
+	bool match_whole_word = ( ( ( allow_ignore_cid_info * )cidi )->match_flag & 0x01 ? true : false );
+	bool regular_expression = ( ( ( allow_ignore_cid_info * )cidi )->match_flag & 0x04 ? true : false );
+	bool *active = &( ( ( allow_ignore_cid_info * )cidi )->active );
 
 	bool update_cid_state = false;
 
-	// Update each displayinfo item to indicate that it is now ignored.
+	pcre2_code *regex_code = NULL;
+	pcre2_match_data *regex_match_data = NULL;
+
+	if ( regular_expression && g_use_regular_expressions )
+	{
+		int error_code;
+		size_t error_offset;
+
+		regex_code = _pcre2_compile_16( ( PCRE2_SPTR16 )caller_id, PCRE2_ZERO_TERMINATED, 0, &error_code, &error_offset, NULL );
+
+		if ( regex_code != NULL )
+		{
+			regex_match_data = _pcre2_match_data_create_from_pattern_16( regex_code, NULL );
+		}
+	}
+
+	// Update each display_info item to indicate that it is now allowed/ignored.
 	node_type *node = dllrbt_get_head( call_log );
 	while ( node != NULL )
 	{
 		DoublyLinkedList *di_node = ( DoublyLinkedList * )node->val;
 		while ( di_node != NULL )
 		{
-			displayinfo *mdi = ( displayinfo * )di_node->data;
+			display_info *mdi = ( display_info * )di_node->data;
 			if ( mdi != NULL )
 			{
-				if ( match_case && match_whole_word )
+				if ( regular_expression )
 				{
-					if ( lstrcmpA( mdi->ci.caller_id, caller_id ) == 0 )
+					if ( g_use_regular_expressions )
+					{
+						if ( regex_match_data != NULL )
+						{
+							int caller_id_length = lstrlenW( mdi->caller_id );
+							if ( _pcre2_match_16( regex_code, ( PCRE2_SPTR16 )mdi->caller_id, caller_id_length, 0, 0, regex_match_data, NULL ) >= 0 )
+							{
+								update_cid_state = true;
+							}
+						}
+					}
+				}
+				else if ( match_case && match_whole_word )
+				{
+					if ( lstrcmpW( mdi->caller_id, caller_id ) == 0 )
 					{
 						update_cid_state = true;
 					}
 				}
 				else if ( !match_case && match_whole_word )
 				{
-					if ( lstrcmpiA( mdi->ci.caller_id, caller_id ) == 0 )
+					if ( lstrcmpiW( mdi->caller_id, caller_id ) == 0 )
 					{
 						update_cid_state = true;
 					}
 				}
 				else if ( match_case && !match_whole_word )
 				{
-					if ( _StrStrA( mdi->ci.caller_id, caller_id ) != NULL )
+					if ( _StrStrW( mdi->caller_id, caller_id ) != NULL )
 					{
 						update_cid_state = true;
 					}
 				}
 				else if ( !match_case && !match_whole_word )
 				{
-					if ( _StrStrIA( mdi->ci.caller_id, caller_id ) != NULL )
+					if ( _StrStrIW( mdi->caller_id, caller_id ) != NULL )
 					{
 						update_cid_state = true;
 					}
@@ -193,25 +218,33 @@ void update_caller_id_name_matches( void *cidi, unsigned char info_type, bool ad
 					{
 						*active = true;
 
-						if ( info_type == 0 )
+						if ( list_type == LIST_TYPE_ALLOW )
+						{
+							++( mdi->allow_cid_match_count );
+						}
+						else
 						{
 							++( mdi->ignore_cid_match_count );
-							GlobalFree( mdi->w_ignore_caller_id );
-							mdi->w_ignore_caller_id = GlobalStrDupW( ST_Yes );
 						}
 					}
 					else
 					{
-						if ( info_type == 0 )
+						if ( list_type == LIST_TYPE_ALLOW )
+						{
+							--( mdi->allow_cid_match_count );
+
+							if ( mdi->allow_cid_match_count == 0 )
+							{
+								*active = false;
+							}
+						}
+						else
 						{
 							--( mdi->ignore_cid_match_count );
 
 							if ( mdi->ignore_cid_match_count == 0 )
 							{
 								*active = false;
-
-								GlobalFree( mdi->w_ignore_caller_id );
-								mdi->w_ignore_caller_id = GlobalStrDupW( ST_No );
 							}
 						}
 					}
@@ -224,6 +257,118 @@ void update_caller_id_name_matches( void *cidi, unsigned char info_type, bool ad
 		}
 
 		node = node->next;
+	}
+
+	if ( regex_match_data != NULL ) { _pcre2_match_data_free_16( regex_match_data ); }
+	if ( regex_code != NULL ) { _pcre2_code_free_16( regex_code ); }
+}
+
+void LoadLists()
+{
+	HANDLE thread = NULL;
+
+	if ( cfg_enable_call_log_history )
+	{
+		importexportinfo *iei = ( importexportinfo * )GlobalAlloc( GMEM_FIXED, sizeof( importexportinfo ) );
+
+		// Include an empty string.
+		iei->file_paths = ( wchar_t * )GlobalAlloc( GPTR, sizeof( wchar_t ) * ( MAX_PATH + 1 ) );
+		_wmemcpy_s( iei->file_paths, MAX_PATH, base_directory, base_directory_length );
+		_wmemcpy_s( iei->file_paths + ( base_directory_length + 1 ), MAX_PATH - ( base_directory_length - 1 ), L"call_log_history\0", 17 );
+		iei->file_paths[ base_directory_length + 17 ] = 0;	// Sanity.
+		iei->file_offset = ( unsigned short )( base_directory_length + 1 );
+		iei->file_type = LOAD_CALL_LOG_HISTORY;
+
+		// iei will be freed in the import_list thread.
+		thread = ( HANDLE )_CreateThread( NULL, 0, import_list, ( void * )iei, 0, NULL );
+		if ( thread != NULL )
+		{
+			CloseHandle( thread );
+		}
+		else
+		{
+			GlobalFree( iei->file_paths );
+			GlobalFree( iei );
+		}
+	}
+
+	allow_ignore_update_info *aiui = ( allow_ignore_update_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_update_info ) );
+	aiui->action = 2;	// Add all allow_list items.
+	aiui->list_type = LIST_TYPE_ALLOW;	// Allow list.
+	aiui->hWnd = g_hWnd_allow_list;
+
+	// aiui is freed in the update_allow_ignore_list thread.
+	thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_list, ( void * )aiui, 0, NULL );
+	if ( thread != NULL )
+	{
+		CloseHandle( thread );
+	}
+	else
+	{
+		GlobalFree( aiui );
+	}
+
+	allow_ignore_cid_update_info *aicidui = ( allow_ignore_cid_update_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_cid_update_info ) );
+	aicidui->action = 2;	// Add all allow_cid_list items.
+	aicidui->list_type = LIST_TYPE_ALLOW;	// Allow CID list.
+	aicidui->hWnd = g_hWnd_allow_cid_list;
+
+	// aicidui is freed in the update_allow_ignore_cid_list thread.
+	thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_cid_list, ( void * )aicidui, 0, NULL );
+	if ( thread != NULL )
+	{
+		CloseHandle( thread );
+	}
+	else
+	{
+		GlobalFree( aicidui );
+	}
+
+	//
+
+	aiui = ( allow_ignore_update_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_update_info ) );
+	aiui->action = 2;	// Add all ignore_list items.
+	aiui->list_type = LIST_TYPE_IGNORE;	// Ignore list.
+	aiui->hWnd = g_hWnd_ignore_list;
+
+	// aiui is freed in the update_allow_ignore_list thread.
+	thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_list, ( void * )aiui, 0, NULL );
+	if ( thread != NULL )
+	{
+		CloseHandle( thread );
+	}
+	else
+	{
+		GlobalFree( aiui );
+	}
+
+	aicidui = ( allow_ignore_cid_update_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_cid_update_info ) );
+	aicidui->action = 2;	// Add all ignore_cid_list items.
+	aicidui->list_type = LIST_TYPE_IGNORE;	// Ignore CID list.
+	aicidui->hWnd = g_hWnd_ignore_cid_list;
+
+	// aicidui is freed in the update_allow_ignore_cid_list thread.
+	thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_cid_list, ( void * )aicidui, 0, NULL );
+	if ( thread != NULL )
+	{
+		CloseHandle( thread );
+	}
+	else
+	{
+		GlobalFree( aicidui );
+	}
+
+	contact_update_info *cui = ( contact_update_info * )GlobalAlloc( GPTR, sizeof( contact_update_info ) );
+	cui->action = 2;
+				
+	thread = ( HANDLE )_CreateThread( NULL, 0, update_contact_list, ( void * )cui, 0, NULL );
+	if ( thread != NULL )
+	{
+		CloseHandle( thread );
+	}
+	else
+	{
+		GlobalFree( cui );
 	}
 }
 
@@ -238,9 +383,15 @@ THREAD_RETURN export_list( void *pArguments )
 	importexportinfo *iei = ( importexportinfo * )pArguments;
 	if ( iei != NULL )
 	{
-		hWnd = ( iei->file_type == IE_CALL_LOG_HISTORY ? g_hWnd_call_log :
-			   ( iei->file_type == IE_CONTACT_LIST ? g_hWnd_contact_list :
-			   ( iei->file_type == IE_IGNORE_CID_LIST ? g_hWnd_ignore_cid_list : g_hWnd_ignore_list ) ) );
+		switch ( iei->file_type )
+		{
+			case IE_ALLOW_PN_LIST:		{ hWnd = g_hWnd_allow_list; } break;
+			case IE_ALLOW_CID_LIST:		{ hWnd = g_hWnd_allow_cid_list; } break;
+			case IE_IGNORE_PN_LIST:		{ hWnd = g_hWnd_ignore_list; } break;
+			case IE_IGNORE_CID_LIST:	{ hWnd = g_hWnd_ignore_cid_list; } break;
+			case IE_CONTACT_LIST:		{ hWnd = g_hWnd_contact_list; } break;
+			case IE_CALL_LOG_HISTORY:	{ hWnd = g_hWnd_call_log; } break;
+		}
 	}
 
 	Processing_Window( hWnd, false );
@@ -249,38 +400,21 @@ THREAD_RETURN export_list( void *pArguments )
 	{
 		if ( iei->file_paths != NULL )
 		{
+			wchar_t *msg = NULL;
+
 			switch ( iei->file_type )
 			{
-				case IE_IGNORE_PN_LIST:
-				{
-					save_ignore_list( iei->file_paths );
-				}
-				break;
-
-				case IE_IGNORE_CID_LIST:
-				{
-					save_ignore_cid_list( iei->file_paths );
-				}
-				break;
-
-				case IE_CONTACT_LIST:
-				{
-					save_contact_list( iei->file_paths );
-				}
-				break;
-
-				case IE_CALL_LOG_HISTORY:
-				{
-					save_call_log_history( iei->file_paths );
-				}
-				break;
+				case IE_ALLOW_PN_LIST:		{ save_allow_ignore_list( iei->file_paths, allow_list, LIST_TYPE_ALLOW );			msg = ST_Exported_allow_phone_number_list; } break;
+				case IE_ALLOW_CID_LIST:		{ save_allow_ignore_cid_list( iei->file_paths, allow_cid_list, LIST_TYPE_ALLOW );	msg = ST_Exported_allow_caller_ID_name_list; } break;
+				case IE_IGNORE_PN_LIST:		{ save_allow_ignore_list( iei->file_paths, ignore_list, LIST_TYPE_IGNORE );			msg = ST_Exported_ignore_phone_number_list; } break;
+				case IE_IGNORE_CID_LIST:	{ save_allow_ignore_cid_list( iei->file_paths, ignore_cid_list, LIST_TYPE_IGNORE );	msg = ST_Exported_ignore_caller_ID_name_list; } break;
+				case IE_CONTACT_LIST:		{ save_contact_list( iei->file_paths );												msg = ST_Exported_contact_list; } break;
+				case IE_CALL_LOG_HISTORY:	{ save_call_log_history( iei->file_paths );											msg = ST_Exported_call_log_history; } break;
 			}
 
 			GlobalFree( iei->file_paths );
 
-			MESSAGE_LOG_OUTPUT( ML_NOTICE, ( iei->file_type == IE_CALL_LOG_HISTORY ? ST_Exported_call_log_history :
-										   ( iei->file_type == IE_CONTACT_LIST ? ST_Exported_contact_list :
-										   ( iei->file_type == IE_IGNORE_CID_LIST ? ST_Exported_ignore_caller_ID_name_list : ST_Exported_ignore_phone_number_list ) ) ) )
+			MESSAGE_LOG_OUTPUT( ML_NOTICE, msg )
 		}
 
 		GlobalFree( iei );
@@ -314,9 +448,16 @@ THREAD_RETURN import_list( void *pArguments )
 	importexportinfo *iei = ( importexportinfo * )pArguments;
 	if ( iei != NULL )
 	{
-		hWnd = ( iei->file_type == IE_CALL_LOG_HISTORY || iei->file_type == LOAD_CALL_LOG_HISTORY ? g_hWnd_call_log :
-			   ( iei->file_type == IE_CONTACT_LIST ? g_hWnd_contact_list :
-			   ( iei->file_type == IE_IGNORE_CID_LIST ? g_hWnd_ignore_cid_list : g_hWnd_ignore_list ) ) );
+		switch ( iei->file_type )
+		{
+			case IE_ALLOW_PN_LIST:		{ hWnd = g_hWnd_allow_list; } break;
+			case IE_ALLOW_CID_LIST:		{ hWnd = g_hWnd_allow_cid_list; } break;
+			case IE_IGNORE_PN_LIST:		{ hWnd = g_hWnd_ignore_list; } break;
+			case IE_IGNORE_CID_LIST:	{ hWnd = g_hWnd_ignore_cid_list; } break;
+			case IE_CONTACT_LIST:		{ hWnd = g_hWnd_contact_list; } break;
+			case IE_CALL_LOG_HISTORY:
+			case LOAD_CALL_LOG_HISTORY:	{ hWnd = g_hWnd_call_log; } break;
+		}
 	}
 
 	Processing_Window( hWnd, false );
@@ -365,32 +506,50 @@ THREAD_RETURN import_list( void *pArguments )
 					// Items will be added to their appropriate range lists when read.
 					switch ( iei->file_type )
 					{
+						case IE_ALLOW_PN_LIST:
 						case IE_IGNORE_PN_LIST:
 						{
-							dllrbt_tree *new_list = dllrbt_create( dllrbt_compare_a );
+							dllrbt_tree *new_list = dllrbt_create( dllrbt_compare_w );
 
-							status = read_ignore_list( file_path, new_list );
+							unsigned char list_type;
+							dllrbt_tree *list;
+							bool *changed;
+
+							if ( iei->file_type == IE_ALLOW_PN_LIST )
+							{
+								list_type = 0;
+								list = allow_list;
+								changed = &allow_list_changed;
+							}
+							else
+							{
+								list_type = 1;
+								list = ignore_list;
+								changed = &ignore_list_changed;
+							}
+
+							status = read_allow_ignore_list( file_path, new_list, list_type );
 
 							node_type *node = dllrbt_get_head( new_list );
 							while ( node != NULL )
 							{
-								ignoreinfo *ii = ( ignoreinfo * )node->val;
-								if ( ii != NULL )
+								allow_ignore_info *aii = ( allow_ignore_info * )node->val;
+								if ( aii != NULL )
 								{
 									// Attempt to insert the new item into the global list.
-									if ( dllrbt_insert( ignore_list, ( void * )ii->c_phone_number, ( void * )ii ) == DLLRBT_STATUS_OK )
+									if ( dllrbt_insert( list, ( void * )aii->phone_number, ( void * )aii ) == DLLRBT_STATUS_OK )
 									{
-										update_phone_number_matches( ii->c_phone_number, 0, ( ( ii->c_phone_number != NULL && is_num( ii->c_phone_number ) == 1 ) ? true : false ), NULL, true );
+										update_phone_number_matches( aii->phone_number, list_type, ( is_num_w( aii->phone_number ) == 1 ? true : false ), NULL, true );
 
-										ignore_list_changed = true;
+										*changed = true;
 
-										lvi.iItem = _SendMessageW( hWnd, LVM_GETITEMCOUNT, 0, 0 );
-										lvi.lParam = ( LPARAM )ii;
+										lvi.iItem = ( int )_SendMessageW( hWnd, LVM_GETITEMCOUNT, 0, 0 );
+										lvi.lParam = ( LPARAM )aii;
 										_SendMessageW( hWnd, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
 									}
 									else	// Problem/duplicate
 									{
-										free_ignoreinfo( &ii );
+										free_allowignoreinfo( &aii );
 									}
 								}
 
@@ -402,32 +561,50 @@ THREAD_RETURN import_list( void *pArguments )
 						}
 						break;
 
+						case IE_ALLOW_CID_LIST:
 						case IE_IGNORE_CID_LIST:
 						{
 							dllrbt_tree *new_list = dllrbt_create( dllrbt_icid_compare );
 
-							status = read_ignore_cid_list( file_path, new_list );
+							unsigned char list_type;
+							dllrbt_tree *list;
+							bool *changed;
+
+							if ( iei->file_type == IE_ALLOW_CID_LIST )
+							{
+								list_type = 0;
+								list = allow_cid_list;
+								changed = &allow_cid_list_changed;
+							}
+							else
+							{
+								list_type = 1;
+								list = ignore_cid_list;
+								changed = &ignore_cid_list_changed;
+							}
+
+							status = read_allow_ignore_cid_list( file_path, new_list, list_type );
 
 							node_type *node = dllrbt_get_head( new_list );
 							while ( node != NULL )
 							{
-								ignorecidinfo *icidi = ( ignorecidinfo * )node->val;
-								if ( icidi != NULL )
+								allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )node->val;
+								if ( aicidi != NULL )
 								{
 									// Attempt to insert the new item into the global list.
-									if ( dllrbt_insert( ignore_cid_list, ( void * )icidi, ( void * )icidi ) == DLLRBT_STATUS_OK )
+									if ( dllrbt_insert( list, ( void * )aicidi, ( void * )aicidi ) == DLLRBT_STATUS_OK )
 									{
-										update_caller_id_name_matches( ( void * )icidi, 0, true );
+										update_caller_id_name_matches( ( void * )aicidi, list_type, true );
 
-										ignore_cid_list_changed = true;
+										*changed = true;
 
-										lvi.iItem = _SendMessageW( hWnd, LVM_GETITEMCOUNT, 0, 0 );
-										lvi.lParam = ( LPARAM )icidi;
+										lvi.iItem = ( int )_SendMessageW( hWnd, LVM_GETITEMCOUNT, 0, 0 );
+										lvi.lParam = ( LPARAM )aicidi;
 										_SendMessageW( hWnd, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
 									}
 									else	// Problem/duplicate
 									{
-										free_ignorecidinfo( &icidi );
+										free_allowignorecidinfo( &aicidi );
 									}
 								}
 
@@ -448,17 +625,17 @@ THREAD_RETURN import_list( void *pArguments )
 							node_type *node = dllrbt_get_head( new_list );
 							while ( node != NULL )
 							{
-								contactinfo *ci = ( contactinfo * )node->val;
+								contact_info *ci = ( contact_info * )node->val;
 								if ( ci != NULL )
 								{
 									// Attempt to insert the new item into the global list.
 									if ( dllrbt_insert( contact_list, ( void * )ci, ( void * )ci ) == DLLRBT_STATUS_OK )
 									{
-										add_custom_caller_id( ci );
+										add_custom_caller_id_w( ci );
 
 										contact_list_changed = true;
 
-										lvi.iItem = _SendMessageW( hWnd, LVM_GETITEMCOUNT, 0, 0 );
+										lvi.iItem = ( int )_SendMessageW( hWnd, LVM_GETITEMCOUNT, 0, 0 );
 										lvi.lParam = ( LPARAM )ci;
 										_SendMessageW( hWnd, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
 									}
@@ -497,10 +674,20 @@ THREAD_RETURN import_list( void *pArguments )
 
 			if ( ml_type & 1 )
 			{
-				MESSAGE_LOG_OUTPUT( ML_NOTICE, ( iei->file_type == LOAD_CALL_LOG_HISTORY ? ST_Loaded_call_log_history :
-											   ( iei->file_type == IE_CALL_LOG_HISTORY ? ST_Imported_call_log_history :
-											   ( iei->file_type == IE_CONTACT_LIST ? ST_Imported_contact_list :
-											   ( iei->file_type == IE_IGNORE_CID_LIST ? ST_Imported_ignore_caller_ID_name_list : ST_Imported_ignore_phone_number_list ) ) ) ) )
+				wchar_t *msg = NULL;
+
+				switch ( iei->file_type )
+				{
+					case IE_ALLOW_PN_LIST:		{ msg = ST_Imported_allow_phone_number_list; } break;
+					case IE_ALLOW_CID_LIST:		{ msg = ST_Imported_allow_caller_ID_name_list; } break;
+					case IE_IGNORE_PN_LIST:		{ msg = ST_Imported_ignore_phone_number_list; } break;
+					case IE_IGNORE_CID_LIST:	{ msg = ST_Imported_ignore_caller_ID_name_list; } break;
+					case IE_CONTACT_LIST:		{ msg = ST_Imported_contact_list; } break;
+					case IE_CALL_LOG_HISTORY:	{ msg = ST_Imported_call_log_history; } break;
+					case LOAD_CALL_LOG_HISTORY:	{ msg = ST_Loaded_call_log_history; } break;
+				}
+
+				MESSAGE_LOG_OUTPUT( ML_NOTICE, msg )
 			}
 
 			if ( ml_type & 2 )	// Bad format.
@@ -534,65 +721,32 @@ THREAD_RETURN import_list( void *pArguments )
 
 THREAD_RETURN remove_items( void *pArguments )
 {
-	removeinfo *ri = ( removeinfo * )pArguments;
-	
-	HWND hWnd = NULL;
-	bool disable_critical_section = false;
-
-	if ( ri != NULL )
-	{
-		disable_critical_section = ri->disable_critical_section;
-		hWnd = ri->hWnd;
-
-		GlobalFree( ri );
-	}
-
 	// This will block every other thread from entering until the first thread is complete.
-	if ( !disable_critical_section )
-	{
-		EnterCriticalSection( &pe_cs );
-	}
+	EnterCriticalSection( &pe_cs );
 
 	in_worker_thread = true;
-	
-	bool *skip_draw = NULL;
 
 	// Prevent the listviews from drawing while freeing lParam values.
-	if ( hWnd == g_hWnd_call_log )
-	{
-		skip_draw = &skip_log_draw;
-	}
-	else if ( hWnd == g_hWnd_contact_list )
-	{
-		skip_draw = &skip_contact_draw;
-	}
-	else if ( hWnd == g_hWnd_ignore_list )
-	{
-		skip_draw = &skip_ignore_draw;
-	}
-	else if ( hWnd == g_hWnd_ignore_cid_list )
-	{
-		skip_draw = &skip_ignore_cid_draw;
-	}
-	
-	if ( skip_draw != NULL )
-	{
-		*skip_draw = true;
-	}
+	skip_list_draw = true;
 
-	if ( !disable_critical_section )
+	removeinfo *ri = ( removeinfo * )pArguments;
+
+	HWND hWnd = ri->hWnd;
+	bool is_thread = ri->is_thread;
+
+	if ( is_thread )
 	{
 		Processing_Window( hWnd, false );
 	}
 
-	char range_number[ 32 ];	// Dummy value.
+	wchar_t range_number[ 32 ];	// Dummy value.
 
 	LVITEM lvi;
 	_memzero( &lvi, sizeof( LVITEM ) );
 	lvi.mask = LVIF_PARAM;
 
-	int item_count = _SendMessageW( hWnd, LVM_GETITEMCOUNT, 0, 0 );
-	int sel_count = _SendMessageW( hWnd, LVM_GETSELECTEDCOUNT, 0, 0 );
+	int item_count = ( int )_SendMessageW( hWnd, LVM_GETITEMCOUNT, 0, 0 );
+	int sel_count = ( int )_SendMessageW( hWnd, LVM_GETSELECTEDCOUNT, 0, 0 );
 
 	int *index_array = NULL;
 
@@ -612,7 +766,7 @@ THREAD_RETURN remove_items( void *pArguments )
 		// Create an index list of selected items (in reverse order).
 		for ( int i = 0; i < sel_count; i++ )
 		{
-			lvi.iItem = index_array[ sel_count - 1 - i ] = _SendMessageW( hWnd, LVM_GETNEXTITEM, lvi.iItem, LVNI_SELECTED );
+			lvi.iItem = index_array[ sel_count - 1 - i ] = ( int )_SendMessageW( hWnd, LVM_GETNEXTITEM, lvi.iItem, LVNI_SELECTED );
 		}
 
 		item_count = sel_count;
@@ -640,11 +794,11 @@ THREAD_RETURN remove_items( void *pArguments )
 
 		if ( hWnd == g_hWnd_call_log )
 		{
-			displayinfo *di = ( displayinfo * )lvi.lParam;
+			display_info *di = ( display_info * )lvi.lParam;
 			if ( di != NULL )
 			{
-				// Update each displayinfo item.
-				dllrbt_iterator *itr = dllrbt_find( call_log, ( void * )di->ci.call_from, false );
+				// Update each display_info item.
+				dllrbt_iterator *itr = dllrbt_find( call_log, ( void * )di->phone_number, false );
 				if ( itr != NULL )
 				{
 					// Head of the linked list.
@@ -655,7 +809,7 @@ THREAD_RETURN remove_items( void *pArguments )
 					DoublyLinkedList *current_node = ll;
 					while ( current_node != NULL )
 					{
-						if ( ( displayinfo * )current_node->data == di )
+						if ( ( display_info * )current_node->data == di )
 						{
 							DLL_RemoveNode( &ll, current_node );
 							GlobalFree( current_node );
@@ -664,7 +818,7 @@ THREAD_RETURN remove_items( void *pArguments )
 							{
 								// Reset the head in the tree.
 								( ( node_type * )itr )->val = ( void * )ll;
-								( ( node_type * )itr )->key = ( void * )( ( displayinfo * )ll->data )->ci.call_from;
+								( ( node_type * )itr )->key = ( void * )( ( display_info * )ll->data )->phone_number;
 
 								call_log_changed = true;
 							}
@@ -691,7 +845,7 @@ THREAD_RETURN remove_items( void *pArguments )
 		}
 		else if ( hWnd == g_hWnd_contact_list )
 		{
-			contactinfo *ci = ( contactinfo * )lvi.lParam;
+			contact_info *ci = ( contact_info * )lvi.lParam;
 			if ( ci != NULL )
 			{
 				dllrbt_iterator *itr = dllrbt_find( contact_list, ( void * )ci, false );
@@ -702,41 +856,81 @@ THREAD_RETURN remove_items( void *pArguments )
 					contact_list_changed = true;	// Causes us to save the contact_list on shutdown.
 				}
 
-				remove_custom_caller_id( ci );
+				remove_custom_caller_id_w( ci );
 
 				free_contactinfo( &ci );
 			}
 
 			if ( i == 0 ) { MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Deleted_contact ) }
 		}
-		else if ( hWnd == g_hWnd_ignore_list )
+		else if ( hWnd == g_hWnd_allow_list )
 		{
-			ignoreinfo *ii = ( ignoreinfo * )lvi.lParam;
-			if ( ii != NULL )
+			allow_ignore_info *aii = ( allow_ignore_info * )lvi.lParam;
+			if ( aii != NULL )
 			{
-				int range_index = lstrlenA( ii->c_phone_number );
+				int range_index = lstrlenW( aii->phone_number );
 				range_index = ( range_index > 0 ? range_index - 1 : 0 );
 
 				// If the number we've removed is a range, then remove it from the range list.
-				if ( is_num( ii->c_phone_number ) == 1 )
+				if ( is_num_w( aii->phone_number ) == 1 )
 				{
-					RangeRemove( &ignore_range_list[ range_index ], ii->c_phone_number );
+					RangeRemove( &allow_range_list[ range_index ], aii->phone_number );
 
-					// Update each displayinfo item to indicate that it is no longer ignored.
-					update_phone_number_matches( ii->c_phone_number, 0, true, &ignore_range_list[ range_index ], false );
+					// Update each display_info item to indicate that it is no longer allowed.
+					update_phone_number_matches( aii->phone_number, 0, true, &allow_range_list[ range_index ], false );
 				}
 				else
 				{
 					// See if the value we remove falls within a range. If it doesn't, then set its new display values.
-					if ( !RangeSearch( &ignore_range_list[ range_index ], ii->c_phone_number, range_number ) )
+					if ( !RangeSearch( &allow_range_list[ range_index ], aii->phone_number, range_number ) )
 					{
-						// Update each displayinfo item to indicate that it is no longer ignored.
-						update_phone_number_matches( ii->c_phone_number, 0, false, NULL, false );
+						// Update each display_info item to indicate that it is no longer allowed.
+						update_phone_number_matches( aii->phone_number, 0, false, NULL, false );
+					}
+				}
+
+				// See if the allow_list phone number exits. It should.
+				dllrbt_iterator *itr = dllrbt_find( allow_list, ( void * )aii->phone_number, false );
+				if ( itr != NULL )
+				{
+					dllrbt_remove( allow_list, itr );	// Remove the node from the tree. The tree will rebalance itself.
+
+					allow_list_changed = true;	// Causes us to save the allow_list on shutdown.
+				}
+
+				free_allowignoreinfo( &aii );
+			}
+
+			if ( i == 0 ) { MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Removed_phone_number_s__from_allow_phone_number_list ) }
+		}
+		else if ( hWnd == g_hWnd_ignore_list )
+		{
+			allow_ignore_info *aii = ( allow_ignore_info * )lvi.lParam;
+			if ( aii != NULL )
+			{
+				int range_index = lstrlenW( aii->phone_number );
+				range_index = ( range_index > 0 ? range_index - 1 : 0 );
+
+				// If the number we've removed is a range, then remove it from the range list.
+				if ( is_num_w( aii->phone_number ) == 1 )
+				{
+					RangeRemove( &ignore_range_list[ range_index ], aii->phone_number );
+
+					// Update each display_info item to indicate that it is no longer ignored.
+					update_phone_number_matches( aii->phone_number, 1, true, &ignore_range_list[ range_index ], false );
+				}
+				else
+				{
+					// See if the value we remove falls within a range. If it doesn't, then set its new display values.
+					if ( !RangeSearch( &ignore_range_list[ range_index ], aii->phone_number, range_number ) )
+					{
+						// Update each display_info item to indicate that it is no longer ignored.
+						update_phone_number_matches( aii->phone_number, 1, false, NULL, false );
 					}
 				}
 
 				// See if the ignore_list phone number exits. It should.
-				dllrbt_iterator *itr = dllrbt_find( ignore_list, ( void * )ii->c_phone_number, false );
+				dllrbt_iterator *itr = dllrbt_find( ignore_list, ( void * )aii->phone_number, false );
 				if ( itr != NULL )
 				{
 					dllrbt_remove( ignore_list, itr );	// Remove the node from the tree. The tree will rebalance itself.
@@ -744,20 +938,41 @@ THREAD_RETURN remove_items( void *pArguments )
 					ignore_list_changed = true;	// Causes us to save the ignore_list on shutdown.
 				}
 
-				free_ignoreinfo( &ii );
+				free_allowignoreinfo( &aii );
 			}
 
 			if ( i == 0 ) { MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Removed_phone_number_s__from_ignore_phone_number_list ) }
 		}
+		else if ( hWnd == g_hWnd_allow_cid_list )
+		{
+			allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )lvi.lParam;
+			if ( aicidi != NULL )
+			{
+				update_caller_id_name_matches( ( void * )aicidi, 0, false );
+
+				// See if the allow_cid_list value exits. It should.
+				dllrbt_iterator *itr = dllrbt_find( allow_cid_list, ( void * )aicidi, false );
+				if ( itr != NULL )
+				{
+					dllrbt_remove( allow_cid_list, itr );	// Remove the node from the tree. The tree will rebalance itself.
+
+					allow_cid_list_changed = true;	// Causes us to save the allow_cid_list on shutdown.
+				}
+
+				free_allowignorecidinfo( &aicidi );
+			}
+
+			if ( i == 0 ) { MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Removed_caller_ID_name_s__from_allow_caller_ID_name_list ) }
+		}
 		else if ( hWnd == g_hWnd_ignore_cid_list )
 		{
-			ignorecidinfo *icidi = ( ignorecidinfo * )lvi.lParam;
-			if ( icidi != NULL )
+			allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )lvi.lParam;
+			if ( aicidi != NULL )
 			{
-				update_caller_id_name_matches( ( void * )icidi, 0, false );
+				update_caller_id_name_matches( ( void * )aicidi, 1, false );
 
 				// See if the ignore_cid_list value exits. It should.
-				dllrbt_iterator *itr = dllrbt_find( ignore_cid_list, ( void * )icidi, false );
+				dllrbt_iterator *itr = dllrbt_find( ignore_cid_list, ( void * )aicidi, false );
 				if ( itr != NULL )
 				{
 					dllrbt_remove( ignore_cid_list, itr );	// Remove the node from the tree. The tree will rebalance itself.
@@ -765,7 +980,7 @@ THREAD_RETURN remove_items( void *pArguments )
 					ignore_cid_list_changed = true;	// Causes us to save the ignore_cid_list on shutdown.
 				}
 
-				free_ignorecidinfo( &icidi );
+				free_allowignorecidinfo( &aicidi );
 			}
 
 			if ( i == 0 ) { MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Removed_caller_ID_name_s__from_ignore_caller_ID_name_list ) }
@@ -786,35 +1001,34 @@ THREAD_RETURN remove_items( void *pArguments )
 		GlobalFree( index_array );
 	}
 
-	if ( skip_draw != NULL )
+	skip_list_draw = false;
+
+	if ( is_thread )
 	{
-		*skip_draw = false;
+		GlobalFree( ri );
+
+		Processing_Window( hWnd, true );
 	}
 
-	if ( !disable_critical_section )
+	// Release the semaphore if we're killing the thread.
+	if ( worker_semaphore != NULL )
 	{
-		Processing_Window( hWnd, true );
-
-		// Release the semaphore if we're killing the thread.
-		if ( worker_semaphore != NULL )
-		{
-			ReleaseSemaphore( worker_semaphore, 1, NULL );
-		}
+		ReleaseSemaphore( worker_semaphore, 1, NULL );
 	}
 
 	in_worker_thread = false;
 
 	// We're done. Let other threads continue.
-	if ( !disable_critical_section )
-	{
-		LeaveCriticalSection( &pe_cs );
-	}
+	LeaveCriticalSection( &pe_cs );
 
-	_ExitThread( 0 );
+	if ( is_thread )
+	{
+		_ExitThread( 0 );
+	}
 	return 0;
 }
 
-THREAD_RETURN update_ignore_list( void *pArguments )
+THREAD_RETURN update_allow_ignore_list( void *pArguments )
 {
 	// This will block every other thread from entering until the first thread is complete.
 	EnterCriticalSection( &pe_cs );
@@ -822,15 +1036,15 @@ THREAD_RETURN update_ignore_list( void *pArguments )
 	in_worker_thread = true;
 
 	HWND hWnd = NULL;
-	ignoreupdateinfo *iui = ( ignoreupdateinfo * )pArguments;
-	if ( iui != NULL )
+	allow_ignore_update_info *aiui = ( allow_ignore_update_info * )pArguments;
+	if ( aiui != NULL )
 	{
-		hWnd = iui->hWnd;
+		hWnd = aiui->hWnd;
 	}
 
 	Processing_Window( hWnd, false );
 
-	if ( iui != NULL )
+	if ( aiui != NULL )
 	{
 		LVITEM lvi;
 		_memzero( &lvi, sizeof( LVITEM ) );
@@ -838,133 +1052,242 @@ THREAD_RETURN update_ignore_list( void *pArguments )
 		lvi.iItem = -1;	// Set this to -1 so that the LVM_GETNEXTITEM call can go through the list correctly.
 		lvi.iSubItem = 0;
 
-		if ( iui->hWnd == g_hWnd_ignore_list )
+		HWND c_hWnd;
+		dllrbt_tree *list;
+		bool *changed;
+
+		if ( aiui->list_type == LIST_TYPE_ALLOW )
 		{
-			if ( iui->action == 0 )	// Add a single item to ignore_list and ignore list listview.
+			list = allow_list;
+			changed = &allow_list_changed;
+			c_hWnd = g_hWnd_allow_list;
+		}
+		else
+		{
+			list = ignore_list;
+			changed = &ignore_list_changed;
+			c_hWnd = g_hWnd_ignore_list;
+		}
+
+		if ( aiui->hWnd == g_hWnd_allow_list || aiui->hWnd == g_hWnd_ignore_list )
+		{
+			if ( aiui->action == 0 )	// Add a single item to allow/ignore_list and allow/ignore list listview.
 			{
 				// Zero init.
-				ignoreinfo *ii = ( ignoreinfo * )GlobalAlloc( GPTR, sizeof( ignoreinfo ) );
+				allow_ignore_info *aii = ( allow_ignore_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_info ) );
 
-				ii->c_phone_number = iui->phone_number;
+				aii->phone_number = aiui->phone_number;
 
-				// Try to insert the ignore_list info in the tree.
-				if ( dllrbt_insert( ignore_list, ( void * )ii->c_phone_number, ( void * )ii ) != DLLRBT_STATUS_OK )
+				// Try to insert the allow/ignore_list info in the tree.
+				if ( dllrbt_insert( list, ( void * )aii->phone_number, ( void * )aii ) != DLLRBT_STATUS_OK )
 				{
-					free_ignoreinfo( &ii );
+					free_allowignoreinfo( &aii );
 
-					MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ST_already_in_ignore_list )
+					MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ( aiui->list_type == LIST_TYPE_ALLOW ? ST_already_in_allow_list : ST_already_in_ignore_list ) )
 				}
-				else	// If it was able to be inserted into the tree, then update our displayinfo items and the ignore list listview.
+				else	// If it was able to be inserted into the tree, then update our display_info items and the ignore list listview.
 				{
-					ii->phone_number = FormatPhoneNumber( iui->phone_number );
+					aii->w_phone_number = FormatPhoneNumberW( aii->phone_number );
 
-					ii->c_total_calls = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * 2 );
-					*ii->c_total_calls = '0';
-					*( ii->c_total_calls + 1 ) = 0;	// Sanity
-
-					int val_length = MultiByteToWideChar( CP_UTF8, 0, ii->c_total_calls, -1, NULL, 0 );	// Include the NULL terminator.
-					wchar_t *val = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * val_length );
-					MultiByteToWideChar( CP_UTF8, 0, ii->c_total_calls, -1, val, val_length );
-
-					ii->total_calls = val;
-
-					ii->count = 0;
-					ii->state = 0;
+					aii->count = 0;
+					aii->state = 0;
 
 					// See if the value we're adding is a range (has wildcard values in it).
-					if ( ii->c_phone_number != NULL && is_num( ii->c_phone_number ) == 1 )
+					bool is_range = ( is_num_w( aii->phone_number ) == 1 ? true : false );
+					if ( is_range )
 					{
-						int phone_number_length = lstrlenA( ii->c_phone_number );
+						int phone_number_length = lstrlenW( aii->phone_number );
 
-						RangeAdd( &ignore_range_list[ ( phone_number_length > 0 ? phone_number_length - 1 : 0 ) ], ii->c_phone_number, phone_number_length );
-
-						// Update each displayinfo item to indicate that it is now ignored.
-						update_phone_number_matches( ii->c_phone_number, 0, true, NULL, true );
+						if ( aiui->list_type == LIST_TYPE_ALLOW )
+						{
+							RangeAdd( &allow_range_list[ ( phone_number_length > 0 ? phone_number_length - 1 : 0 ) ], aii->phone_number, phone_number_length );
+						}
+						else
+						{
+							RangeAdd( &ignore_range_list[ ( phone_number_length > 0 ? phone_number_length - 1 : 0 ) ], aii->phone_number, phone_number_length );
+						}
 					}
-					else
-					{
-						// Update each displayinfo item to indicate that it is now ignored.
-						update_phone_number_matches( ii->c_phone_number, 0, false, NULL, true );
-					}
 
-					ignore_list_changed = true;
+					// Update each display_info item to indicate that it is now allowed/ignored.
+					update_phone_number_matches( aii->phone_number, aiui->list_type, is_range, NULL, true );
 
-					lvi.iItem = _SendMessageW( g_hWnd_ignore_list, LVM_GETITEMCOUNT, 0, 0 );
-					lvi.lParam = ( LPARAM )ii;	// lParam = our contactinfo structure from the connection thread.
-					_SendMessageW( g_hWnd_ignore_list, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
+					*changed = true;
 
-					MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Added_phone_number_to_ignore_phone_number_list )
+					lvi.iItem = ( int )_SendMessageW( aiui->hWnd, LVM_GETITEMCOUNT, 0, 0 );
+					lvi.lParam = ( LPARAM )aii;	// lParam = our contact_info structure from the connection thread.
+					_SendMessageW( aiui->hWnd, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
+
+					MESSAGE_LOG_OUTPUT( ML_NOTICE, ( aiui->list_type == LIST_TYPE_ALLOW ? ST_Added_phone_number_to_allow_phone_number_list : ST_Added_phone_number_to_ignore_phone_number_list ) )
 				}
 			}
-			else if ( iui->action == 1 )	// Remove from ignore_list and ignore list listview.
+			else if ( aiui->action == 1 )	// Remove from allow/ignore_list and allow/ignore list listview.
 			{
-				removeinfo *ri = ( removeinfo * )GlobalAlloc( GMEM_FIXED, sizeof( removeinfo ) );
-				ri->disable_critical_section = true;
-				ri->hWnd = g_hWnd_ignore_list;
-
-				// ri will be freed in the remove_items thread.
-				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, remove_items, ( void * )ri, 0, NULL );
-				if ( thread != NULL )
-				{
-					WaitForSingleObject( thread, INFINITE );	// Wait for the remove_items thread to finish.
-					CloseHandle( thread );
-				}
-				else
-				{
-					GlobalFree( ri );
-				}
+				removeinfo ri;
+				ri.is_thread = false;
+				ri.hWnd = aiui->hWnd;
+				remove_items( ( void * )&ri );
 			}
-			else if ( iui->action == 2 )	// Add all items in the ignore_list to the ignore list listview.
+			else if ( aiui->action == 2 )	// Add all items in the allow/ignore_list to the allow/ignore list listview.
 			{
 				// Insert a row into our listview.
-				node_type *node = dllrbt_get_head( ignore_list );
+				node_type *node = dllrbt_get_head( list );
 				while ( node != NULL )
 				{
-					ignoreinfo *ii = ( ignoreinfo * )node->val;
-					if ( ii != NULL )
+					allow_ignore_info *aii = ( allow_ignore_info * )node->val;
+					if ( aii != NULL )
 					{
-						lvi.iItem = _SendMessageW( g_hWnd_ignore_list, LVM_GETITEMCOUNT, 0, 0 );
-						lvi.lParam = ( LPARAM )ii;	// lParam = our contactinfo structure from the connection thread.
-						_SendMessageW( g_hWnd_ignore_list, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
+						lvi.iItem = ( int )_SendMessageW( aiui->hWnd, LVM_GETITEMCOUNT, 0, 0 );
+						lvi.lParam = ( LPARAM )aii;	// lParam = our contact_info structure from the connection thread.
+						_SendMessageW( aiui->hWnd, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
 					}
 
 					node = node->next;
 				}
 
-				MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Loaded_ignore_phone_number_list )
+				MESSAGE_LOG_OUTPUT( ML_NOTICE, ( aiui->list_type == LIST_TYPE_ALLOW ? ST_Loaded_allow_phone_number_list : ST_Loaded_ignore_phone_number_list ) )
 			}
-			else if ( iui->action == 3 )	// Update the recently called number's call count.
+			else if ( aiui->action == 3 )	// Update entry.
 			{
-				if ( iui->ii != NULL )
+				allow_ignore_info *old_aii = aiui->aii;
+				if ( old_aii != NULL )
 				{
-					++( iui->ii->count );
+					// See if the new phone number is in our allow/ignore_list.
+					dllrbt_iterator *itr = dllrbt_find( list, ( void * )aiui->phone_number, false );
+					if ( itr == NULL )
+					{
+						// See if the old phone number is in our allow/ignore_list.
+						itr = dllrbt_find( list, ( void * )old_aii->phone_number, false );
+						if ( itr != NULL )
+						{
+							dllrbt_remove( list, itr );	// Remove the node from the tree. The tree will rebalance itself.
 
-					GlobalFree( iui->ii->c_total_calls );
+							wchar_t range_number[ 32 ];	// Dummy value.
 
-					iui->ii->c_total_calls = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * 11 );
-					__snprintf( iui->ii->c_total_calls, 11, "%lu", iui->ii->count );
+							int range_index = lstrlenW( old_aii->phone_number );
+							range_index = ( range_index > 0 ? range_index - 1 : 0 );
 
-					GlobalFree( iui->ii->total_calls );
+							// If the number we've removed is a range, then remove it from the range list.
+							if ( is_num_w( old_aii->phone_number ) == 1 )
+							{
+								if ( aiui->list_type == LIST_TYPE_ALLOW )
+								{
+									RangeRemove( &allow_range_list[ range_index ], old_aii->phone_number );
 
-					int val_length = MultiByteToWideChar( CP_UTF8, 0, iui->ii->c_total_calls, -1, NULL, 0 );	// Include the NULL terminator.
-					wchar_t *val = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * val_length );
-					MultiByteToWideChar( CP_UTF8, 0, iui->ii->c_total_calls, -1, val, val_length );
+									// Update each display_info item to indicate that it is no longer allowed.
+									update_phone_number_matches( old_aii->phone_number, 0, true, &allow_range_list[ range_index ], false );
+								}
+								else
+								{
+									RangeRemove( &ignore_range_list[ range_index ], old_aii->phone_number );
 
-					iui->ii->total_calls = val;
+									// Update each display_info item to indicate that it is no longer ignored.
+									update_phone_number_matches( old_aii->phone_number, 1, true, &ignore_range_list[ range_index ], false );
+								}
+							}
+							else
+							{
+								bool in_range;
 
-					ignore_list_changed = true;
+								if ( aiui->list_type == LIST_TYPE_ALLOW )
+								{
+									in_range = RangeSearch( &allow_range_list[ range_index ], old_aii->phone_number, range_number );
+								}
+								else
+								{
+									in_range = RangeSearch( &ignore_range_list[ range_index ], old_aii->phone_number, range_number );
+								}
+
+								// See if the value we remove falls within a range. If it doesn't, then set its new display values.
+								if ( !in_range )
+								{
+									// Update each display_info item to indicate that it is no longer allowed/ignored.
+									update_phone_number_matches( old_aii->phone_number, aiui->list_type, false, NULL, false );
+								}
+							}
+
+							GlobalFree( old_aii->phone_number );
+							GlobalFree( old_aii->w_phone_number );
+							GlobalFree( old_aii->w_last_called );
+							old_aii->w_last_called = NULL;
+							old_aii->last_called.QuadPart = 0;
+
+							old_aii->phone_number = aiui->phone_number;
+
+							// Try to insert the allow/ignore_list info in the tree.
+							if ( dllrbt_insert( list, ( void * )old_aii->phone_number, ( void * )old_aii ) != DLLRBT_STATUS_OK )
+							{
+								free_allowignoreinfo( &old_aii );
+
+								MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ( aiui->list_type == LIST_TYPE_ALLOW ? ST_already_in_allow_list : ST_already_in_ignore_list ) )
+							}
+							else	// If it was able to be inserted into the tree, then update our display_info items and the ignore list listview.
+							{
+								old_aii->w_phone_number = FormatPhoneNumberW( old_aii->phone_number );
+
+								old_aii->count = 0;
+								old_aii->state = 0;
+
+								// See if the value we're adding is a range (has wildcard values in it).
+								bool is_range = ( is_num_w( old_aii->phone_number ) == 1 ? true : false );
+								if ( is_range )
+								{
+									int phone_number_length = lstrlenW( old_aii->phone_number );
+
+									if ( aiui->list_type == LIST_TYPE_ALLOW )
+									{
+										RangeAdd( &allow_range_list[ ( phone_number_length > 0 ? phone_number_length - 1 : 0 ) ], old_aii->phone_number, phone_number_length );
+									}
+									else
+									{
+										RangeAdd( &ignore_range_list[ ( phone_number_length > 0 ? phone_number_length - 1 : 0 ) ], old_aii->phone_number, phone_number_length );
+									}
+								}
+
+								// Update each display_info item to indicate that it is now allowed/ignored.
+								update_phone_number_matches( old_aii->phone_number, aiui->list_type, is_range, NULL, true );
+
+								*changed = true;
+
+								MESSAGE_LOG_OUTPUT( ML_NOTICE, ( aiui->list_type == LIST_TYPE_ALLOW ? ST_Updated_allowed_phone_number : ST_Updated_ignored_phone_number ) )
+							}
+						}
+					}
+					else
+					{
+						MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ( aiui->list_type == LIST_TYPE_ALLOW ? ST_already_in_allow_list : ST_already_in_ignore_list ) )
+
+						GlobalFree( aiui->phone_number );
+					}
+				}
+			}
+			else if ( aiui->action == 4 )	// Update the recently called number's call count.
+			{
+				if ( aiui->aii != NULL )
+				{
+					++( aiui->aii->count );
+
+					if ( aiui->last_called.QuadPart > 0 )
+					{
+						aiui->aii->last_called = aiui->last_called;
+
+						GlobalFree( aiui->aii->w_last_called );
+
+						aiui->aii->w_last_called = FormatTimestamp( aiui->aii->last_called );
+					}
+
+					*changed = true;
 				}
 
-				MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Updated_ignored_phone_number_s_call_count )
+				MESSAGE_LOG_OUTPUT( ML_NOTICE, ( aiui->list_type == LIST_TYPE_ALLOW ? ST_Updated_allowed_phone_number_s_call_count : ST_Updated_ignored_phone_number_s_call_count ) )
 			}
 
 			_InvalidateRect( g_hWnd_call_log, NULL, TRUE );
 		}
-		else if ( iui->hWnd == g_hWnd_call_log )	// call log listview
+		else if ( aiui->hWnd == g_hWnd_call_log )	// call log listview
 		{
-			int item_count = _SendMessageW( g_hWnd_call_log, LVM_GETITEMCOUNT, 0, 0 );
-			int sel_count = _SendMessageW( g_hWnd_call_log, LVM_GETSELECTEDCOUNT, 0, 0 );
-			
+			int item_count = ( int )_SendMessageW( g_hWnd_call_log, LVM_GETITEMCOUNT, 0, 0 );
+			int sel_count = ( int )_SendMessageW( g_hWnd_call_log, LVM_GETSELECTEDCOUNT, 0, 0 );
+
 			bool handle_all = false;
 			if ( item_count == sel_count )
 			{
@@ -975,7 +1298,7 @@ THREAD_RETURN update_ignore_list( void *pArguments )
 				item_count = sel_count;
 			}
 
-			bool remove_state_changed = false;	// If true, then go through the ignore list listview and remove the items that have changed state.
+			bool remove_state_changed = false;	// If true, then go through the allow/ignore list listview and remove the items that have changed state.
 			bool skip_range_warning = false;	// Skip the range warning if we've already displayed it.
 
 			int last_selected = lvi.iItem;
@@ -995,144 +1318,136 @@ THREAD_RETURN update_ignore_list( void *pArguments )
 				}
 				else
 				{
-					last_selected = lvi.iItem = _SendMessageW( g_hWnd_call_log, LVM_GETNEXTITEM, last_selected, LVNI_SELECTED );
+					last_selected = lvi.iItem = ( int )_SendMessageW( g_hWnd_call_log, LVM_GETNEXTITEM, last_selected, LVNI_SELECTED );
 				}
 
 				_SendMessageW( g_hWnd_call_log, LVM_GETITEM, 0, ( LPARAM )&lvi );
 
-				displayinfo *di = ( displayinfo * )lvi.lParam;
+				display_info *di = ( display_info * )lvi.lParam;
 				if ( di != NULL )
 				{
-					if ( di->ignore_phone_number && iui->action == 1 )		// Remove from ignore_list.
-					{
-						char range_number[ 32 ];	// Dummy value.
+					bool *phone_number_state = ( aiui->list_type == LIST_TYPE_ALLOW ? &di->allow_phone_number : &di->ignore_phone_number );
 
-						int range_index = lstrlenA( di->ci.call_from );
+					if ( *phone_number_state && aiui->action == 1 )		// Remove from allow/ignore_list.
+					{
+						wchar_t range_number[ 32 ];	// Dummy value.
+
+						int range_index = lstrlenW( di->phone_number );
 						range_index = ( range_index > 0 ? range_index - 1 : 0 );
 
 						// First, see if the phone number is in our range list.
-						if ( !RangeSearch( &ignore_range_list[ range_index ], di->ci.call_from, range_number ) )
+						bool in_range;
+						if ( aiui->list_type == LIST_TYPE_ALLOW )
 						{
-							// If not, then see if the phone number is in our ignore_list.
-							dllrbt_iterator *itr = dllrbt_find( ignore_list, ( void * )di->ci.call_from, false );
+							in_range = RangeSearch( &allow_range_list[ range_index ], di->phone_number, range_number );
+						}
+						else
+						{
+							in_range = RangeSearch( &ignore_range_list[ range_index ], di->phone_number, range_number );
+						}
+
+						if ( !in_range )
+						{
+							// If not, then see if the phone number is in our allow/ignore_list.
+							dllrbt_iterator *itr = dllrbt_find( list, ( void * )di->phone_number, false );
 							if ( itr != NULL )
 							{
-								// Update each displayinfo item to indicate that it is no longer ignored.
-								update_phone_number_matches( di->ci.call_from, 0, false, NULL, false );
+								// Update each display_info item to indicate that it is no longer allowed/ignored.
+								update_phone_number_matches( di->phone_number, aiui->list_type, false, NULL, false );
 
-								// If an ignore list listview item also shows up in the call log listview, then we'll remove it after this loop.
-								ignoreinfo *ii = ( ignoreinfo * )( ( node_type * )itr )->val;
-								if ( ii != NULL )
+								// If an allow/ignore list listview item also shows up in the call log listview, then we'll remove it after this loop.
+								allow_ignore_info *aii = ( allow_ignore_info * )( ( node_type * )itr )->val;
+								if ( aii != NULL )
 								{
-									ii->state = 1;
+									aii->state = 1;
 								}
-								remove_state_changed = true;	// This will let us go through the ignore list listview and free items with a state == 1.
+								remove_state_changed = true;	// This will let us go through the allow/ignore list listview and free items with a state == 1.
 
-								dllrbt_remove( ignore_list, itr );	// Remove the node from the tree. The tree will rebalance itself.
+								dllrbt_remove( list, itr );	// Remove the node from the tree. The tree will rebalance itself.
 
-								ignore_list_changed = true;	// Causes us to save the ignore_list on shutdown.
+								*changed = true;	// Causes us to save the allow/ignore_list on shutdown.
 							}
 
-							di->ignore_phone_number = false;
-							GlobalFree( di->w_ignore_phone_number );
-							di->w_ignore_phone_number = GlobalStrDupW( ST_No );
+							*phone_number_state = false;
 						}
 						else
 						{
 							if ( !skip_range_warning )
 							{
-								MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ST_remove_from_ignore_phone_number_list )
+								MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ( aiui->list_type == LIST_TYPE_ALLOW ? ST_remove_from_allow_phone_number_list : ST_remove_from_ignore_phone_number_list ) )
 								skip_range_warning = true;
 							}
 						}
 					}
-					else if ( !di->ignore_phone_number && iui->action == 0 )	// Add to ignore_list.
+					else if ( !( *phone_number_state ) && aiui->action == 0 )	// Add to allow/ignore_list.
 					{
 						// Zero init.
-						ignoreinfo *ii = ( ignoreinfo * )GlobalAlloc( GPTR, sizeof( ignoreinfo ) );
+						allow_ignore_info *aii = ( allow_ignore_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_info ) );
 
-						ii->c_phone_number = GlobalStrDupA( di->ci.call_from );
+						aii->phone_number = GlobalStrDupW( di->phone_number );
 
-						if ( dllrbt_insert( ignore_list, ( void * )ii->c_phone_number, ( void * )ii ) != DLLRBT_STATUS_OK )
+						if ( dllrbt_insert( list, ( void * )aii->phone_number, ( void * )aii ) != DLLRBT_STATUS_OK )
 						{
-							free_ignoreinfo( &ii );
+							free_allowignoreinfo( &aii );
 
-							MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ST_already_in_ignore_list )
+							MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ( aiui->list_type == LIST_TYPE_ALLOW ? ST_already_in_allow_list : ST_already_in_ignore_list ) )
 						}
-						else	// Add to ignore list listview as well.
+						else	// Add to allow/ignore list listview as well.
 						{
-							ii->phone_number = FormatPhoneNumber( di->ci.call_from );
+							aii->w_phone_number = FormatPhoneNumberW( aii->phone_number );
 
-							ii->c_total_calls = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * 2 );
-							*ii->c_total_calls = '0';
-							*( ii->c_total_calls + 1 ) = 0;	// Sanity
-
-							int val_length = MultiByteToWideChar( CP_UTF8, 0, ii->c_total_calls, -1, NULL, 0 );	// Include the NULL terminator.
-							wchar_t *val = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * val_length );
-							MultiByteToWideChar( CP_UTF8, 0, ii->c_total_calls, -1, val, val_length );
-
-							ii->total_calls = val;
-
-							ii->count = 0;
-
-							ii->state = 0;
+							aii->count = 0;
+							aii->state = 0;
 
 							// Update all nodes if it already exits.
-							update_phone_number_matches( di->ci.call_from, 0, false, NULL, true );
+							update_phone_number_matches( aii->phone_number, aiui->list_type, false, NULL, true );
 
-							di->ignore_phone_number = true;
-							GlobalFree( di->w_ignore_phone_number );
-							di->w_ignore_phone_number = GlobalStrDupW( ST_Yes );
+							*phone_number_state = true;
 
-							/*	// Wildcard values shouldn't appear in the call log listview.
-							// See if the value we're adding is a range (has wildcard values in it). Only allow 10 digit numbers.
-							if ( ii->c_phone_number != NULL && lstrlenA( ii->c_phone_number ) == 10 && is_num( ii->c_phone_number ) == 1 )
-							{
-								AddRange( &range_list, ii->c_phone_number );
-							}*/
+							*changed = true;
 
-							ignore_list_changed = true;
+							lvi.iItem = ( int )_SendMessageW( c_hWnd, LVM_GETITEMCOUNT, 0, 0 );
+							lvi.lParam = ( LPARAM )aii;
+							_SendMessageW( c_hWnd, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
 
-							lvi.iItem = _SendMessageW( g_hWnd_ignore_list, LVM_GETITEMCOUNT, 0, 0 );
-							lvi.lParam = ( LPARAM )ii;
-							_SendMessageW( g_hWnd_ignore_list, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
-
-							if ( i == 0 ) { MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Added_phone_number_s__to_ignore_phone_number_list ) }
+							if ( i == 0 ) { MESSAGE_LOG_OUTPUT( ML_NOTICE, ( aiui->list_type == LIST_TYPE_ALLOW ? ST_Added_phone_number_s__to_allow_phone_number_list :
+																												  ST_Added_phone_number_s__to_ignore_phone_number_list ) ) }
 						}
 					}
 				}
 			}
 
-			// If we removed items in the call log listview from the ignore_list, then remove them from the ignore list listview.
+			// If we removed items in the call log listview from the allow/ignore_list, then remove them from the allow/ignore list listview.
 			if ( remove_state_changed )
 			{
-				int item_count = _SendMessageW( g_hWnd_ignore_list, LVM_GETITEMCOUNT, 0, 0 );
+				int item_count = ( int )_SendMessageW( c_hWnd, LVM_GETITEMCOUNT, 0, 0 );
 
-				skip_ignore_draw = true;
-				_EnableWindow( g_hWnd_ignore_list, FALSE );
+				skip_list_draw = true;
+				_EnableWindow( c_hWnd, FALSE );
 
 				// Start from the end and work backwards.
 				for ( lvi.iItem = item_count - 1; lvi.iItem >= 0; --lvi.iItem )
 				{
-					_SendMessageW( g_hWnd_ignore_list, LVM_GETITEM, 0, ( LPARAM )&lvi );
+					_SendMessageW( c_hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi );
 
-					ignoreinfo *ii = ( ignoreinfo * )lvi.lParam;
-					if ( ii != NULL && ii->state == 1 )
+					allow_ignore_info *aii = ( allow_ignore_info * )lvi.lParam;
+					if ( aii != NULL && aii->state == 1 )
 					{
-						free_ignoreinfo( &ii );
+						free_allowignoreinfo( &aii );
 
-						_SendMessageW( g_hWnd_ignore_list, LVM_DELETEITEM, lvi.iItem, 0 );
+						_SendMessageW( c_hWnd, LVM_DELETEITEM, lvi.iItem, 0 );
 					}
 				}
 
-				skip_ignore_draw = false;
-				_EnableWindow( g_hWnd_ignore_list, TRUE );
+				skip_list_draw = false;
+				_EnableWindow( c_hWnd, TRUE );
 
-				MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Removed_phone_number_s__from_ignore_phone_number_list )
+				MESSAGE_LOG_OUTPUT( ML_NOTICE, ( aiui->list_type == LIST_TYPE_ALLOW ? ST_Removed_phone_number_s__from_allow_phone_number_list :
+																					  ST_Removed_phone_number_s__from_ignore_phone_number_list ) )
 			}
 		}
 
-		GlobalFree( iui );
+		GlobalFree( aiui );
 	}
 
 	Processing_Window( hWnd, true );
@@ -1152,7 +1467,7 @@ THREAD_RETURN update_ignore_list( void *pArguments )
 	return 0;
 }
 
-THREAD_RETURN update_ignore_cid_list( void *pArguments )
+THREAD_RETURN update_allow_ignore_cid_list( void *pArguments )
 {
 	// This will block every other thread from entering until the first thread is complete.
 	EnterCriticalSection( &pe_cs );
@@ -1160,15 +1475,15 @@ THREAD_RETURN update_ignore_cid_list( void *pArguments )
 	in_worker_thread = true;
 
 	HWND hWnd = NULL;
-	ignorecidupdateinfo *icidui = ( ignorecidupdateinfo * )pArguments;
-	if ( icidui != NULL )
+	allow_ignore_cid_update_info *aicidui = ( allow_ignore_cid_update_info * )pArguments;
+	if ( aicidui != NULL )
 	{
-		hWnd = icidui->hWnd;
+		hWnd = aicidui->hWnd;
 	}
 
 	Processing_Window( hWnd, false );
 
-	if ( icidui != NULL )
+	if ( aicidui != NULL )
 	{
 		LVITEM lvi;
 		_memzero( &lvi, sizeof( LVITEM ) );
@@ -1176,201 +1491,227 @@ THREAD_RETURN update_ignore_cid_list( void *pArguments )
 		lvi.iItem = -1;	// Set this to -1 so that the LVM_GETNEXTITEM call can go through the list correctly.
 		lvi.iSubItem = 0;
 
-		if ( icidui->hWnd == g_hWnd_ignore_cid_list )
+		HWND c_hWnd;
+		dllrbt_tree *list;
+		bool *changed;
+
+		if ( aicidui->list_type == LIST_TYPE_ALLOW )
 		{
-			if ( icidui->action == 0 )	// Add a single item to ignore_cid_list and ignore list listview.
+			list = allow_cid_list;
+			changed = &allow_cid_list_changed;
+			c_hWnd = g_hWnd_allow_cid_list;
+		}
+		else
+		{
+			list = ignore_cid_list;
+			changed = &ignore_cid_list_changed;
+			c_hWnd = g_hWnd_ignore_cid_list;
+		}
+
+		if ( aicidui->hWnd == g_hWnd_allow_cid_list || aicidui->hWnd == g_hWnd_ignore_cid_list )
+		{
+			if ( aicidui->action == 0 )	// Add a single item to allow/ignore_cid_list and allow/ignore list listview.
 			{
 				// Zero init.
-				ignorecidinfo *icidi = ( ignorecidinfo * )GlobalAlloc( GPTR, sizeof( ignorecidinfo ) );
+				allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_cid_info ) );
 
-				icidi->c_caller_id = icidui->caller_id;
+				aicidi->caller_id = aicidui->caller_id;
 
-				icidi->match_case = icidui->match_case;
-				icidi->match_whole_word = icidui->match_whole_word;
+				aicidi->match_flag = aicidui->match_flag;
 
-				// Try to insert the ignore_cid_list info in the tree.
-				if ( dllrbt_insert( ignore_cid_list, ( void * )icidi, ( void * )icidi ) != DLLRBT_STATUS_OK )
+				// Try to insert the allow/ignore_cid_list info in the tree.
+				if ( dllrbt_insert( list, ( void * )aicidi, ( void * )aicidi ) != DLLRBT_STATUS_OK )
 				{
-					free_ignorecidinfo( &icidi );
+					free_allowignorecidinfo( &aicidi );
 
-					MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ST_cid_already_in_ignore_cid_list )
+					MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ( aicidui->list_type == LIST_TYPE_ALLOW ? ST_cid_already_in_allow_cid_list : ST_cid_already_in_ignore_cid_list ) )
 				}
-				else	// If it was able to be inserted into the tree, then update our displayinfo items and the ignore cid list listview.
+				else	// If it was able to be inserted into the tree, then update our display_info items and the allow/ignore cid list listview.
 				{
-					int val_length = MultiByteToWideChar( CP_UTF8, 0, icidi->c_caller_id, -1, NULL, 0 );	// Include the NULL terminator.
-					wchar_t *val = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * val_length );
-					MultiByteToWideChar( CP_UTF8, 0, icidi->c_caller_id, -1, val, val_length );
+					aicidi->count = 0;
+					aicidi->state = 0;
+					aicidi->active = false;
 
-					icidi->caller_id = val;
+					update_caller_id_name_matches( ( void * )aicidi, aicidui->list_type, true );
 
-					icidi->c_total_calls = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * 2 );
-					*icidi->c_total_calls = '0';
-					*( icidi->c_total_calls + 1 ) = 0;	// Sanity
+					*changed = true;
 
-					val_length = MultiByteToWideChar( CP_UTF8, 0, icidi->c_total_calls, -1, NULL, 0 );	// Include the NULL terminator.
-					val = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * val_length );
-					MultiByteToWideChar( CP_UTF8, 0, icidi->c_total_calls, -1, val, val_length );
+					lvi.iItem = ( int )_SendMessageW( aicidui->hWnd, LVM_GETITEMCOUNT, 0, 0 );
+					lvi.lParam = ( LPARAM )aicidi;
+					_SendMessageW( aicidui->hWnd, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
 
-					icidi->total_calls = val;
-
-					if ( !icidi->match_case )
-					{
-						icidi->c_match_case = GlobalStrDupA( "No" );
-						icidi->w_match_case = GlobalStrDupW( ST_No );
-					}
-					else
-					{
-						icidi->c_match_case = GlobalStrDupA( "Yes" );
-						icidi->w_match_case = GlobalStrDupW( ST_Yes );
-					}
-
-					if ( !icidi->match_whole_word )
-					{
-						icidi->c_match_whole_word = GlobalStrDupA( "No" );
-						icidi->w_match_whole_word = GlobalStrDupW( ST_No );
-					}
-					else
-					{
-						icidi->c_match_whole_word = GlobalStrDupA( "Yes" );
-						icidi->w_match_whole_word = GlobalStrDupW( ST_Yes );
-					}
-
-					icidi->count = 0;
-					icidi->state = 0;
-					icidi->active = false;
-
-					update_caller_id_name_matches( ( void * )icidi, 0, true );
-
-					ignore_cid_list_changed = true;
-
-					lvi.iItem = _SendMessageW( g_hWnd_ignore_cid_list, LVM_GETITEMCOUNT, 0, 0 );
-					lvi.lParam = ( LPARAM )icidi;
-					_SendMessageW( g_hWnd_ignore_cid_list, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
-
-					MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Added_caller_ID_name_to_ignore_caller_ID_name_list )
+					MESSAGE_LOG_OUTPUT( ML_NOTICE, ( aicidui->list_type == LIST_TYPE_ALLOW ? ST_Added_caller_ID_name_to_allow_caller_ID_name_list : ST_Added_caller_ID_name_to_ignore_caller_ID_name_list ) )
 				}
 			}
-			else if ( icidui->action == 1 )	// Remove from ignore_cid_list and ignore cid list listview.
+			else if ( aicidui->action == 1 )	// Remove from allow/ignore_cid_list and allow/ignore cid list listview.
 			{
-				removeinfo *ri = ( removeinfo * )GlobalAlloc( GMEM_FIXED, sizeof( removeinfo ) );
-				ri->disable_critical_section = true;
-				ri->hWnd = g_hWnd_ignore_cid_list;
-
-				// ri will be freed in the remove_items thread.
-				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, remove_items, ( void * )ri, 0, NULL );
-				if ( thread != NULL )
-				{
-					WaitForSingleObject( thread, INFINITE );	// Wait for the remove_items thread to finish.
-					CloseHandle( thread );
-				}
-				else
-				{
-					GlobalFree( ri );
-				}
+				removeinfo ri;
+				ri.is_thread = false;
+				ri.hWnd = aicidui->hWnd;
+				remove_items( ( void * )&ri );
 			}
-			else if ( icidui->action == 2 )	// Add all items in the ignore_cid_list to the ignore cid list listview.
+			else if ( aicidui->action == 2 )	// Add all items in the allow/ignore_cid_list to the allow/ignore cid list listview.
 			{
 				// Insert a row into our listview.
-				node_type *node = dllrbt_get_head( ignore_cid_list );
+				node_type *node = dllrbt_get_head( list );
 				while ( node != NULL )
 				{
-					ignorecidinfo *icidi = ( ignorecidinfo * )node->val;
-					if ( icidi != NULL )
+					allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )node->val;
+					if ( aicidi != NULL )
 					{
-						lvi.iItem = _SendMessageW( g_hWnd_ignore_cid_list, LVM_GETITEMCOUNT, 0, 0 );
-						lvi.lParam = ( LPARAM )icidi;	// lParam = our contactinfo structure from the connection thread.
-						_SendMessageW( g_hWnd_ignore_cid_list, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
+						lvi.iItem = ( int )_SendMessageW( aicidui->hWnd, LVM_GETITEMCOUNT, 0, 0 );
+						lvi.lParam = ( LPARAM )aicidi;	// lParam = our contact_info structure from the connection thread.
+						_SendMessageW( aicidui->hWnd, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
 					}
 
 					node = node->next;
 				}
 
-				MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Loaded_ignore_caller_ID_name_list )
+				MESSAGE_LOG_OUTPUT( ML_NOTICE, ( aicidui->list_type == LIST_TYPE_ALLOW ? ST_Loaded_allow_caller_ID_name_list : ST_Loaded_ignore_caller_ID_name_list ) )
 			}
-			else if ( icidui->action == 3 )	// Update entry
+			else if ( aicidui->action == 3 )	// Update entry
 			{
-				ignorecidinfo *old_icidi = icidui->icidi;
-				if ( old_icidi != NULL )
+				allow_ignore_cid_info *old_aicidi = aicidui->aicidi;
+				if ( old_aicidi != NULL )
 				{
-					// This temporary structure is used to search our ignore_cid_list tree.
-					ignorecidinfo *new_icidi = ( ignorecidinfo * )GlobalAlloc( GMEM_FIXED, sizeof( ignorecidinfo ) );
+					// This temporary structure is used to search our allow/ignore_cid_list tree.
+					allow_ignore_cid_info new_aicidi;
 
-					new_icidi->c_caller_id = old_icidi->c_caller_id;	// DO NOT FREE THIS VALUE.
-					new_icidi->match_case = icidui->match_case;
-					new_icidi->match_whole_word = icidui->match_whole_word;
+					if ( aicidui->caller_id != NULL )
+					{
+						new_aicidi.caller_id = aicidui->caller_id;
+					}
+					else
+					{
+						new_aicidi.caller_id = old_aicidi->caller_id;	// DO NOT FREE THIS VALUE.
+					}
+
+					new_aicidi.match_flag = aicidui->match_flag;
 
 					// See if our new entry already exists.
-					dllrbt_iterator *itr = dllrbt_find( ignore_cid_list, ( void * )new_icidi, false );
+					dllrbt_iterator *itr = dllrbt_find( list, ( void * )&new_aicidi, false );
 					if ( itr == NULL )
 					{
 						bool keep_active = false;
 						bool update_cid_state1 = false, update_cid_state2 = false;
 
-						// Update each displayinfo item to indicate that it is ignored or no longer ignored.
+						pcre2_code *old_regex_code = NULL;
+						pcre2_match_data *old_regex_match_data = NULL;
+
+						pcre2_code *new_regex_code = NULL;
+						pcre2_match_data *new_regex_match_data = NULL;
+
+						int error_code;
+						size_t error_offset;
+
+						if ( g_use_regular_expressions )
+						{
+							if ( ( old_aicidi->match_flag & 0x04 ) )
+							{
+								old_regex_code = _pcre2_compile_16( ( PCRE2_SPTR16 )old_aicidi->caller_id, PCRE2_ZERO_TERMINATED, 0, &error_code, &error_offset, NULL );
+								if ( old_regex_code != NULL )
+								{
+									old_regex_match_data = _pcre2_match_data_create_from_pattern_16( old_regex_code, NULL );
+								}
+							}
+
+							if ( ( new_aicidi.match_flag & 0x04 ) )
+							{
+								new_regex_code = _pcre2_compile_16( ( PCRE2_SPTR16 )new_aicidi.caller_id, PCRE2_ZERO_TERMINATED, 0, &error_code, &error_offset, NULL );
+								if ( new_regex_code != NULL )
+								{
+									new_regex_match_data = _pcre2_match_data_create_from_pattern_16( new_regex_code, NULL );
+								}
+							}
+						}
+
+						// Update each display_info item to indicate that it is allowed/ignored or no longer allowed/ignored.
 						node_type *node = dllrbt_get_head( call_log );
 						while ( node != NULL )
 						{
 							DoublyLinkedList *di_node = ( DoublyLinkedList * )node->val;
 							while ( di_node != NULL )
 							{
-								displayinfo *mdi = ( displayinfo * )di_node->data;
+								display_info *mdi = ( display_info * )di_node->data;
 								if ( mdi != NULL )
 								{
 									// Find our old matches.
-									if ( old_icidi->match_case && old_icidi->match_whole_word )
+									if ( old_aicidi->match_flag & 0x04 )
 									{
-										if ( lstrcmpA( mdi->ci.caller_id, old_icidi->c_caller_id ) == 0 )
+										if ( old_regex_match_data != NULL )
+										{
+											int caller_id_length = lstrlenW( mdi->caller_id );
+											if ( _pcre2_match_16( old_regex_code, ( PCRE2_SPTR16 )mdi->caller_id, caller_id_length, 0, 0, old_regex_match_data, NULL ) >= 0 )
+											{
+												update_cid_state1 = true;
+											}
+										}
+									}
+									else if ( ( old_aicidi->match_flag & 0x02 ) && ( old_aicidi->match_flag & 0x01 ) )
+									{
+										if ( lstrcmpW( mdi->caller_id, old_aicidi->caller_id ) == 0 )
 										{
 											update_cid_state1 = true;
 										}
 									}
-									else if ( !old_icidi->match_case && old_icidi->match_whole_word )
+									else if ( !( old_aicidi->match_flag & 0x02 ) && ( old_aicidi->match_flag & 0x01 ) )
 									{
-										if ( lstrcmpiA( mdi->ci.caller_id, old_icidi->c_caller_id ) == 0 )
+										if ( lstrcmpiW( mdi->caller_id, old_aicidi->caller_id ) == 0 )
 										{
 											update_cid_state1 = true;
 										}
 									}
-									else if ( old_icidi->match_case && !old_icidi->match_whole_word )
+									else if ( ( old_aicidi->match_flag & 0x02 ) && !( old_aicidi->match_flag & 0x01 ) )
 									{
-										if ( _StrStrA( mdi->ci.caller_id, old_icidi->c_caller_id ) != NULL )
+										if ( _StrStrW( mdi->caller_id, old_aicidi->caller_id ) != NULL )
 										{
 											update_cid_state1 = true;
 										}
 									}
-									else if ( !old_icidi->match_case && !old_icidi->match_whole_word )
+									else if ( !( old_aicidi->match_flag & 0x02 ) && !( old_aicidi->match_flag & 0x01 ) )
 									{
-										if ( _StrStrIA( mdi->ci.caller_id, old_icidi->c_caller_id ) != NULL )
+										if ( _StrStrIW( mdi->caller_id, old_aicidi->caller_id ) != NULL )
 										{
 											update_cid_state1 = true;
 										}
 									}
 
 									// Find our new matches.
-									if ( new_icidi->match_case && new_icidi->match_whole_word )
+									if ( new_aicidi.match_flag & 0x04 )
 									{
-										if ( lstrcmpA( mdi->ci.caller_id, old_icidi->c_caller_id ) == 0 )
+										if ( new_regex_match_data != NULL )
+										{
+											int caller_id_length = lstrlenW( mdi->caller_id );
+											if ( _pcre2_match_16( new_regex_code, ( PCRE2_SPTR16 )mdi->caller_id, caller_id_length, 0, 0, new_regex_match_data, NULL ) >= 0 )
+											{
+												update_cid_state2 = true;
+											}
+										}
+									}
+									else if ( ( new_aicidi.match_flag & 0x02 ) && ( new_aicidi.match_flag & 0x01 ) )
+									{
+										if ( lstrcmpW( mdi->caller_id, new_aicidi.caller_id ) == 0 )
 										{
 											update_cid_state2 = true;
 										}
 									}
-									else if ( !new_icidi->match_case && new_icidi->match_whole_word )
+									else if ( !( new_aicidi.match_flag & 0x02 ) && ( new_aicidi.match_flag & 0x01 ) )
 									{
-										if ( lstrcmpiA( mdi->ci.caller_id, old_icidi->c_caller_id ) == 0 )
+										if ( lstrcmpiW( mdi->caller_id, new_aicidi.caller_id ) == 0 )
 										{
 											update_cid_state2 = true;
 										}
 									}
-									else if ( new_icidi->match_case && !new_icidi->match_whole_word )
+									else if ( ( new_aicidi.match_flag & 0x02 ) && !( new_aicidi.match_flag & 0x01 ) )
 									{
-										if ( _StrStrA( mdi->ci.caller_id, old_icidi->c_caller_id ) != NULL )
+										if ( _StrStrW( mdi->caller_id, new_aicidi.caller_id ) != NULL )
 										{
 											update_cid_state2 = true;
 										}
 									}
-									else if ( !new_icidi->match_case && !new_icidi->match_whole_word )
+									else if ( !( new_aicidi.match_flag & 0x02 ) && !( new_aicidi.match_flag & 0x01 ) )
 									{
-										if ( _StrStrIA( mdi->ci.caller_id, old_icidi->c_caller_id ) != NULL )
+										if ( _StrStrIW( mdi->caller_id, new_aicidi.caller_id ) != NULL )
 										{
 											update_cid_state2 = true;
 										}
@@ -1382,27 +1723,45 @@ THREAD_RETURN update_ignore_cid_list( void *pArguments )
 									}
 									else if ( update_cid_state1 )
 									{
-										--( mdi->ignore_cid_match_count );
-
-										if ( mdi->ignore_cid_match_count == 0 )
+										if ( aicidui->list_type == LIST_TYPE_ALLOW )
 										{
-											old_icidi->active = false;
+											--( mdi->allow_cid_match_count );
 
-											GlobalFree( mdi->w_ignore_caller_id );
-											mdi->w_ignore_caller_id = GlobalStrDupW( ST_No );
+											if ( mdi->allow_cid_match_count == 0 )
+											{
+												old_aicidi->active = false;
+											}
+										}
+										else
+										{
+											--( mdi->ignore_cid_match_count );
+
+											if ( mdi->ignore_cid_match_count == 0 )
+											{
+												old_aicidi->active = false;
+											}
 										}
 									}
 									else if ( update_cid_state2 )
 									{
-										++( mdi->ignore_cid_match_count );
-
-										if ( mdi->ignore_cid_match_count > 0 )
+										if ( aicidui->list_type == LIST_TYPE_ALLOW )
 										{
-											old_icidi->active = true;
-										}
+											++( mdi->allow_cid_match_count );
 
-										GlobalFree( mdi->w_ignore_caller_id );
-										mdi->w_ignore_caller_id = GlobalStrDupW( ST_Yes );
+											if ( mdi->allow_cid_match_count > 0 )
+											{
+												old_aicidi->active = true;
+											}
+										}
+										else
+										{
+											++( mdi->ignore_cid_match_count );
+
+											if ( mdi->ignore_cid_match_count > 0 )
+											{
+												old_aicidi->active = true;
+											}
+										}
 									}
 
 									update_cid_state1 = update_cid_state2 = false;
@@ -1414,96 +1773,78 @@ THREAD_RETURN update_ignore_cid_list( void *pArguments )
 							node = node->next;
 						}
 
+						if ( old_regex_match_data != NULL ) { _pcre2_match_data_free_16( old_regex_match_data ); }
+						if ( old_regex_code != NULL ) { _pcre2_code_free_16( old_regex_code ); }
+
+						if ( new_regex_match_data != NULL ) { _pcre2_match_data_free_16( new_regex_match_data ); }
+						if ( new_regex_code != NULL ) { _pcre2_code_free_16( new_regex_code ); }
+
 						if ( keep_active )
 						{
-							old_icidi->active = true;
+							old_aicidi->active = true;
 						}
 
 						// Find the old icidi and remove it.
-						itr = dllrbt_find( ignore_cid_list, ( void * )old_icidi, false );
-						dllrbt_remove( ignore_cid_list, itr );	// Remove the node from the tree. The tree will rebalance itself.
+						itr = dllrbt_find( list, ( void * )old_aicidi, false );
+						dllrbt_remove( list, itr );	// Remove the node from the tree. The tree will rebalance itself.
 
-						old_icidi->match_case = new_icidi->match_case;
-						old_icidi->match_whole_word = new_icidi->match_whole_word;
+						old_aicidi->match_flag = new_aicidi.match_flag;
+
+						if ( aicidui->caller_id != NULL )
+						{
+							GlobalFree( old_aicidi->caller_id );
+							old_aicidi->caller_id = aicidui->caller_id;
+						}
+
+						old_aicidi->last_called.QuadPart = 0;
+						GlobalFree( old_aicidi->w_last_called );
+						old_aicidi->w_last_called = NULL;
+
+						old_aicidi->count = 0;
 
 						// Re-add the old icidi with updated values.
-						dllrbt_insert( ignore_cid_list, ( void * )old_icidi, ( void * )old_icidi );
+						dllrbt_insert( list, ( void * )old_aicidi, ( void * )old_aicidi );
 
-						GlobalFree( old_icidi->c_match_case );
-						GlobalFree( old_icidi->w_match_case );
-						GlobalFree( old_icidi->c_match_whole_word );
-						GlobalFree( old_icidi->w_match_whole_word );
+						*changed = true;	// Makes us save the new allow/ignore_cid_list.
 
-						if ( !old_icidi->match_case )
-						{
-							old_icidi->c_match_case = GlobalStrDupA( "No" );
-							old_icidi->w_match_case = GlobalStrDupW( ST_No );
-						}
-						else
-						{
-							old_icidi->c_match_case = GlobalStrDupA( "Yes" );
-							old_icidi->w_match_case = GlobalStrDupW( ST_Yes );
-						}
-
-						if ( !old_icidi->match_whole_word )
-						{
-							old_icidi->c_match_whole_word = GlobalStrDupA( "No" );
-							old_icidi->w_match_whole_word = GlobalStrDupW( ST_No );
-						}
-						else
-						{
-							old_icidi->c_match_whole_word = GlobalStrDupA( "Yes" );
-							old_icidi->w_match_whole_word = GlobalStrDupW( ST_Yes );
-						}
-
-						ignore_cid_list_changed = true;	// Makes us save the new ignore_cid_list.
-
-						MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Updated_ignored_caller_ID_name )
+						MESSAGE_LOG_OUTPUT( ML_NOTICE, ( aicidui->list_type == LIST_TYPE_ALLOW ? ST_Updated_allowed_caller_ID_name : ST_Updated_ignored_caller_ID_name ) )
 					}
 					else
 					{
-						// See if the value we're updating is different from the match above.
-						if ( old_icidi != ( ignorecidinfo * )( ( node_type * )itr )->val )
-						{
-							MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ST_cid_already_in_ignore_cid_list )
-						}
-					}
+						MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ( aicidui->list_type == LIST_TYPE_ALLOW ? ST_cid_already_in_allow_cid_list : ST_cid_already_in_ignore_cid_list ) )
 
-					GlobalFree( new_icidi );	// We don't need this anymore.
+						GlobalFree( aicidui->caller_id );
+					}
 				}
 			}
-			else if ( icidui->action == 4 )	// Update the recently called number's call count.
+			else if ( aicidui->action == 4 )	// Update the recently called number's call count.
 			{
-				if ( icidui->icidi != NULL )
+				if ( aicidui->aicidi != NULL )
 				{
-					++( icidui->icidi->count );
+					++( aicidui->aicidi->count );
 
-					GlobalFree( icidui->icidi->c_total_calls );
+					if ( aicidui->last_called.QuadPart > 0 )
+					{
+						aicidui->aicidi->last_called = aicidui->last_called;
 
-					icidui->icidi->c_total_calls = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * 11 );
-					__snprintf( icidui->icidi->c_total_calls, 11, "%lu", icidui->icidi->count );
+						GlobalFree( aicidui->aicidi->w_last_called );
 
-					GlobalFree( icidui->icidi->total_calls );
+						aicidui->aicidi->w_last_called = FormatTimestamp( aicidui->aicidi->last_called );
+					}
 
-					int val_length = MultiByteToWideChar( CP_UTF8, 0, icidui->icidi->c_total_calls, -1, NULL, 0 );	// Include the NULL terminator.
-					wchar_t *val = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * val_length );
-					MultiByteToWideChar( CP_UTF8, 0, icidui->icidi->c_total_calls, -1, val, val_length );
-
-					icidui->icidi->total_calls = val;
-
-					ignore_cid_list_changed = true;
+					*changed = true;
 				}
 
-				MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Updated_ignored_caller_ID_name_s_call_count )
+				MESSAGE_LOG_OUTPUT( ML_NOTICE, ( aicidui->list_type == LIST_TYPE_ALLOW ? ST_Updated_allowed_caller_ID_name_s_call_count : ST_Updated_ignored_caller_ID_name_s_call_count ) )
 			}
 
 			_InvalidateRect( g_hWnd_call_log, NULL, TRUE );
 		}
-		else if ( icidui->hWnd == g_hWnd_call_log )	// call log listview
+		else if ( aicidui->hWnd == g_hWnd_call_log )	// call log listview
 		{
-			int item_count = _SendMessageW( g_hWnd_call_log, LVM_GETITEMCOUNT, 0, 0 );
-			int sel_count = _SendMessageW( g_hWnd_call_log, LVM_GETSELECTEDCOUNT, 0, 0 );
-			
+			int item_count = ( int )_SendMessageW( g_hWnd_call_log, LVM_GETITEMCOUNT, 0, 0 );
+			int sel_count = ( int )_SendMessageW( g_hWnd_call_log, LVM_GETSELECTEDCOUNT, 0, 0 );
+
 			bool handle_all = false;
 			if ( item_count == sel_count )
 			{
@@ -1514,7 +1855,7 @@ THREAD_RETURN update_ignore_cid_list( void *pArguments )
 				item_count = sel_count;
 			}
 
-			bool remove_state_changed = false;	// If true, then go through the ignore list listview and remove the items that have changed state.
+			bool remove_state_changed = false;	// If true, then go through the allow/ignore list listview and remove the items that have changed state.
 			bool skip_multi_cid_warning = false;	// Skip the multiple caller IDs warning if we've already displayed it.
 
 			int last_selected = lvi.iItem;
@@ -1534,55 +1875,84 @@ THREAD_RETURN update_ignore_cid_list( void *pArguments )
 				}
 				else
 				{
-					last_selected = lvi.iItem = _SendMessageW( g_hWnd_call_log, LVM_GETNEXTITEM, last_selected, LVNI_SELECTED );
+					last_selected = lvi.iItem = ( int )_SendMessageW( g_hWnd_call_log, LVM_GETNEXTITEM, last_selected, LVNI_SELECTED );
 				}
 
 				_SendMessageW( g_hWnd_call_log, LVM_GETITEM, 0, ( LPARAM )&lvi );
 
-				displayinfo *di = ( displayinfo * )lvi.lParam;
+				display_info *di = ( display_info * )lvi.lParam;
 				if ( di != NULL )
 				{
-					if ( di->ignore_cid_match_count > 0 && icidui->action == 1 )		// Remove from ignore_cid_list.
+					unsigned int *cid_match_count_state = ( aicidui->list_type == LIST_TYPE_ALLOW ? &di->allow_cid_match_count : &di->ignore_cid_match_count );
+
+					if ( *cid_match_count_state > 0 && aicidui->action == 1 )		// Remove from allow/ignore_cid_list.
 					{
-						if ( di->ignore_cid_match_count <= 1 )
+						if ( *cid_match_count_state <= 1 )
 						{
 							bool update_cid_state = false;
 
+							int caller_id_length = lstrlenW( di->caller_id );
+
 							// Find a keyword that matches the value we want to remove. Make sure that keyword only matches one set of values.
-							node_type *node = dllrbt_get_head( ignore_cid_list );
+							node_type *node = dllrbt_get_head( list );
 							while ( node != NULL )
 							{
 								// The keyword to remove.
-								ignorecidinfo *icidi = ( ignorecidinfo * )node->val;
-								if ( icidi != NULL )
+								allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )node->val;
+								if ( aicidi != NULL )
 								{
 									// Only remove active keyword matches.
-									if ( icidi->active )
+									if ( aicidi->active )
 									{
-										if ( icidi->match_case && icidi->match_whole_word )
+										if ( aicidi->match_flag & 0x04 )
 										{
-											if ( lstrcmpA( di->ci.caller_id, icidi->c_caller_id ) == 0 )
+											int error_code;
+											size_t error_offset;
+
+											if ( g_use_regular_expressions )
+											{
+												pcre2_code *regex_code = _pcre2_compile_16( ( PCRE2_SPTR16 )aicidi->caller_id, PCRE2_ZERO_TERMINATED, 0, &error_code, &error_offset, NULL );
+												if ( regex_code != NULL )
+												{
+													pcre2_match_data *regex_match_data = _pcre2_match_data_create_from_pattern_16( regex_code, NULL );
+													if ( regex_match_data != NULL )
+													{
+														if ( _pcre2_match_16( regex_code, ( PCRE2_SPTR16 )di->caller_id, caller_id_length, 0, 0, regex_match_data, NULL ) >= 0 )
+														{
+															update_cid_state = true;
+														}
+
+														_pcre2_match_data_free_16( regex_match_data );
+													}
+
+													_pcre2_code_free_16( regex_code );
+												}
+											}
+										}
+										else if ( ( aicidi->match_flag & 0x02 ) && ( aicidi->match_flag & 0x01 ) )
+										{
+											if ( lstrcmpW( di->caller_id, aicidi->caller_id ) == 0 )
 											{
 												update_cid_state = true;
 											}
 										}
-										else if ( !icidi->match_case && icidi->match_whole_word )
+										else if ( !( aicidi->match_flag & 0x02 ) && ( aicidi->match_flag & 0x01 ) )
 										{
-											if ( lstrcmpiA( di->ci.caller_id, icidi->c_caller_id ) == 0 )
+											if ( lstrcmpiW( di->caller_id, aicidi->caller_id ) == 0 )
 											{
 												update_cid_state = true;
 											}
 										}
-										else if ( icidi->match_case && !icidi->match_whole_word )
+										else if ( ( aicidi->match_flag & 0x02 ) && !( aicidi->match_flag & 0x01 ) )
 										{
-											if ( _StrStrA( di->ci.caller_id, icidi->c_caller_id ) != NULL )
+											if ( _StrStrW( di->caller_id, aicidi->caller_id ) != NULL )
 											{
 												update_cid_state = true;
 											}
 										}
-										else if ( !icidi->match_case && !icidi->match_whole_word )
+										else if ( !( aicidi->match_flag & 0x02 ) && !( aicidi->match_flag & 0x01 ) )
 										{
-											if ( _StrStrIA( di->ci.caller_id, icidi->c_caller_id ) != NULL )
+											if ( _StrStrIW( di->caller_id, aicidi->caller_id ) != NULL )
 											{
 												update_cid_state = true;
 											}
@@ -1590,15 +1960,15 @@ THREAD_RETURN update_ignore_cid_list( void *pArguments )
 
 										if ( update_cid_state )
 										{
-											update_caller_id_name_matches( ( void * )icidi, 0, false );
+											update_caller_id_name_matches( ( void * )aicidi, aicidui->list_type, false );
 
-											icidi->state = 1;
-											remove_state_changed = true;	// This will let us go through the ignore cid list listview and free items with a state == 1.
+											aicidi->state = 1;
+											remove_state_changed = true;	// This will let us go through the allow/ignore cid list listview and free items with a state == 1.
 
-											dllrbt_iterator *itr = dllrbt_find( ignore_cid_list, ( void * )icidi, false );
-											dllrbt_remove( ignore_cid_list, itr );	// Remove the node from the tree. The tree will rebalance itself.
+											dllrbt_iterator *itr = dllrbt_find( list, ( void * )aicidi, false );
+											dllrbt_remove( list, itr );	// Remove the node from the tree. The tree will rebalance itself.
 
-											ignore_cid_list_changed = true;	// Causes us to save the ignore_cid_list on shutdown.
+											*changed = true;	// Causes us to save the allow/ignore_cid_list on shutdown.
 
 											break;	// Break out of the keyword search.
 										}
@@ -1612,116 +1982,77 @@ THREAD_RETURN update_ignore_cid_list( void *pArguments )
 						{
 							if ( !skip_multi_cid_warning )
 							{
-								MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ST_remove_from_ignore_caller_id_list )
+								MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ( aicidui->list_type == LIST_TYPE_ALLOW ? ST_remove_from_allow_caller_id_list : ST_remove_from_ignore_caller_id_list ) )
 								skip_multi_cid_warning = true;
 							}
 						}
 					}
-					else if ( di->ignore_cid_match_count == 0 && icidui->action == 0 )	// Add to ignore_cid_list.
+					else if ( *cid_match_count_state == 0 && aicidui->action == 0 )	// Add to allow/ignore_cid_list.
 					{
 						// Zero init.
-						ignorecidinfo *icidi = ( ignorecidinfo * )GlobalAlloc( GPTR, sizeof( ignorecidinfo ) );
+						allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_cid_info ) );
 
-						icidi->c_caller_id = GlobalStrDupA( di->ci.caller_id );
+						aicidi->caller_id = GlobalStrDupW( di->caller_id );
 
-						icidi->match_case = icidui->match_case;
-						icidi->match_whole_word = icidui->match_whole_word;
+						aicidi->match_flag = aicidui->match_flag;
 
-						// Try to insert the ignore_cid_list info in the tree.
-						if ( dllrbt_insert( ignore_cid_list, ( void * )icidi, ( void * )icidi ) != DLLRBT_STATUS_OK )
+						// Try to insert the allow/ignore_cid_list info in the tree.
+						if ( dllrbt_insert( list, ( void * )aicidi, ( void * )aicidi ) != DLLRBT_STATUS_OK )
 						{
-							free_ignorecidinfo( &icidi );
+							free_allowignorecidinfo( &aicidi );
 
-							MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ST_cid_already_in_ignore_cid_list )
+							MESSAGE_LOG_OUTPUT_MB( ML_WARNING, ( aicidui->list_type == LIST_TYPE_ALLOW ? ST_cid_already_in_allow_cid_list : ST_cid_already_in_ignore_cid_list ) )
 						}
-						else	// If it was able to be inserted into the tree, then update our displayinfo items and the ignore cid list listview.
+						else	// If it was able to be inserted into the tree, then update our display_info items and the allow/ignore cid list listview.
 						{
-							int val_length = MultiByteToWideChar( CP_UTF8, 0, icidi->c_caller_id, -1, NULL, 0 );	// Include the NULL terminator.
-							wchar_t *val = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * val_length );
-							MultiByteToWideChar( CP_UTF8, 0, icidi->c_caller_id, -1, val, val_length );
+							aicidi->count = 0;
+							aicidi->state = 0;
+							aicidi->active = false;
 
-							icidi->caller_id = val;
+							update_caller_id_name_matches( ( void * )aicidi, aicidui->list_type, true );
 
-							icidi->c_total_calls = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * 2 );
-							*icidi->c_total_calls = '0';
-							*( icidi->c_total_calls + 1 ) = 0;	// Sanity
+							*changed = true;
 
-							val_length = MultiByteToWideChar( CP_UTF8, 0, icidi->c_total_calls, -1, NULL, 0 );	// Include the NULL terminator.
-							val = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * val_length );
-							MultiByteToWideChar( CP_UTF8, 0, icidi->c_total_calls, -1, val, val_length );
+							lvi.iItem = ( int )_SendMessageW( c_hWnd, LVM_GETITEMCOUNT, 0, 0 );
+							lvi.lParam = ( LPARAM )aicidi;
+							_SendMessageW( c_hWnd, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
 
-							icidi->total_calls = val;
-
-							if ( !icidi->match_case )
-							{
-								icidi->c_match_case = GlobalStrDupA( "No" );
-								icidi->w_match_case = GlobalStrDupW( ST_No );
-							}
-							else
-							{
-								icidi->c_match_case = GlobalStrDupA( "Yes" );
-								icidi->w_match_case = GlobalStrDupW( ST_Yes );
-							}
-
-							if ( !icidi->match_whole_word )
-							{
-								icidi->c_match_whole_word = GlobalStrDupA( "No" );
-								icidi->w_match_whole_word = GlobalStrDupW( ST_No );
-							}
-							else
-							{
-								icidi->c_match_whole_word = GlobalStrDupA( "Yes" );
-								icidi->w_match_whole_word = GlobalStrDupW( ST_Yes );
-							}
-
-							icidi->count = 0;
-							icidi->state = 0;
-							icidi->active = false;
-
-							update_caller_id_name_matches( ( void * )icidi, 0, true );
-
-							ignore_cid_list_changed = true;
-
-							lvi.iItem = _SendMessageW( g_hWnd_ignore_cid_list, LVM_GETITEMCOUNT, 0, 0 );
-							lvi.lParam = ( LPARAM )icidi;
-							_SendMessageW( g_hWnd_ignore_cid_list, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
-
-							if ( i == 0 ) { MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Added_caller_ID_name_s__to_ignore_caller_ID_name_list ) }
+							if ( i == 0 ) { MESSAGE_LOG_OUTPUT( ML_NOTICE, ( aicidui->list_type == LIST_TYPE_ALLOW ? ST_Added_caller_ID_name_s__to_allow_caller_ID_name_list : ST_Added_caller_ID_name_s__to_ignore_caller_ID_name_list ) ) }
 						}
 					}
 				}
 			}
 
-			// If we removed items in the call log listview from the ignore_cid_list, then remove them from the ignore cid list listview.
+			// If we removed items in the call log listview from the allow/ignore_cid_list, then remove them from the allow/ignore cid list listview.
 			if ( remove_state_changed )
 			{
-				int item_count = _SendMessageW( g_hWnd_ignore_cid_list, LVM_GETITEMCOUNT, 0, 0 );
+				int item_count = ( int )_SendMessageW( c_hWnd, LVM_GETITEMCOUNT, 0, 0 );
 
-				skip_ignore_cid_draw = true;
-				_EnableWindow( g_hWnd_ignore_cid_list, FALSE );
+				skip_list_draw = true;
+				_EnableWindow( c_hWnd, FALSE );
 
 				// Start from the end and work backwards.
 				for ( lvi.iItem = item_count - 1; lvi.iItem >= 0; --lvi.iItem )
 				{
-					_SendMessageW( g_hWnd_ignore_cid_list, LVM_GETITEM, 0, ( LPARAM )&lvi );
+					_SendMessageW( c_hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi );
 
-					ignorecidinfo *icidi = ( ignorecidinfo * )lvi.lParam;
-					if ( icidi != NULL && icidi->state == 1 )
+					allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )lvi.lParam;
+					if ( aicidi != NULL && aicidi->state == 1 )
 					{
-						free_ignorecidinfo( &icidi );
+						free_allowignorecidinfo( &aicidi );
 
-						_SendMessageW( g_hWnd_ignore_cid_list, LVM_DELETEITEM, lvi.iItem, 0 );
+						_SendMessageW( c_hWnd, LVM_DELETEITEM, lvi.iItem, 0 );
 					}
 				}
 
-				skip_ignore_cid_draw = false;
-				_EnableWindow( g_hWnd_ignore_cid_list, TRUE );
+				skip_list_draw = false;
+				_EnableWindow( c_hWnd, TRUE );
 
-				MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Removed_caller_ID_name_s__from_ignore_caller_ID_name_list )
+				MESSAGE_LOG_OUTPUT( ML_NOTICE, ( aicidui->list_type == LIST_TYPE_ALLOW ? ST_Removed_caller_ID_name_s__from_allow_caller_ID_name_list : ST_Removed_caller_ID_name_s__from_ignore_caller_ID_name_list ) )
 			}
 		}
 
-		GlobalFree( icidui );
+		GlobalFree( aicidui );
 	}
 
 	Processing_Window( hWnd, true );
@@ -1753,7 +2084,7 @@ THREAD_RETURN update_contact_list( void *pArguments )
 	wchar_t *val = NULL;
 	int val_length = 0;
 
-	contactupdateinfo *cui = ( contactupdateinfo * )pArguments;	// Freed at the end of this thread.
+	contact_update_info *cui = ( contact_update_info * )pArguments;	// Freed at the end of this thread.
 	
 	if ( cui != NULL )
 	{
@@ -1765,7 +2096,7 @@ THREAD_RETURN update_contact_list( void *pArguments )
 
 		if ( cui->action == 0 ) // Add a single item to the contact_list and contact list listview
 		{
-			contactinfo *ci = cui->old_ci;
+			contact_info *ci = cui->old_ci;
 
 			if ( ci != NULL )
 			{
@@ -1777,19 +2108,18 @@ THREAD_RETURN update_contact_list( void *pArguments )
 				}
 				else
 				{
-					ci->home_phone_number = FormatPhoneNumber( ci->contact.home_phone_number );
-					ci->cell_phone_number = FormatPhoneNumber( ci->contact.cell_phone_number );
-					ci->office_phone_number = FormatPhoneNumber( ci->contact.office_phone_number );
-					ci->other_phone_number = FormatPhoneNumber( ci->contact.other_phone_number );
+					ci->w_home_phone_number = FormatPhoneNumberW( ci->home_phone_number );
+					ci->w_cell_phone_number = FormatPhoneNumberW( ci->cell_phone_number );
+					ci->w_office_phone_number = FormatPhoneNumberW( ci->office_phone_number );
+					ci->w_other_phone_number = FormatPhoneNumberW( ci->other_phone_number );
+					ci->w_work_phone_number = FormatPhoneNumberW( ci->work_phone_number );
+					ci->w_fax_number = FormatPhoneNumberW( ci->fax_number );
 
-					ci->work_phone_number = FormatPhoneNumber( ci->contact.work_phone_number );
-					ci->fax_number = FormatPhoneNumber( ci->contact.fax_number );
-
-					add_custom_caller_id( ci );
+					add_custom_caller_id_w( ci );
 
 					contact_list_changed = true;
 
-					lvi.iItem = _SendMessageW( g_hWnd_contact_list, LVM_GETITEMCOUNT, 0, 0 );
+					lvi.iItem = ( int )_SendMessageW( g_hWnd_contact_list, LVM_GETITEMCOUNT, 0, 0 );
 					lvi.lParam = ( LPARAM )ci;
 					_SendMessageW( g_hWnd_contact_list, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
 
@@ -1799,21 +2129,10 @@ THREAD_RETURN update_contact_list( void *pArguments )
 		}
 		else if ( cui->action == 1 )	// Remove from contact_list and contact list listview.
 		{
-			removeinfo *ri = ( removeinfo * )GlobalAlloc( GMEM_FIXED, sizeof( removeinfo ) );
-			ri->disable_critical_section = true;
-			ri->hWnd = g_hWnd_contact_list;
-
-			// ri will be freed in the remove_items thread.
-			HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, remove_items, ( void * )ri, 0, NULL );
-			if ( thread != NULL )
-			{
-				WaitForSingleObject( thread, INFINITE );	// Wait for the remove_items thread to finish.
-				CloseHandle( thread );
-			}
-			else
-			{
-				GlobalFree( ri );
-			}
+			removeinfo ri;
+			ri.is_thread = false;
+			ri.hWnd = g_hWnd_contact_list;
+			remove_items( ( void * )&ri );
 		}
 		else if ( cui->action == 2 )	// Add all items in the contact_list to the contact list listview.
 		{
@@ -1821,11 +2140,11 @@ THREAD_RETURN update_contact_list( void *pArguments )
 			node_type *node = dllrbt_get_head( contact_list );
 			while ( node != NULL )
 			{
-				contactinfo *ci = ( contactinfo * )node->val;
+				contact_info *ci = ( contact_info * )node->val;
 				if ( ci != NULL )
 				{
-					lvi.iItem = _SendMessageW( g_hWnd_contact_list, LVM_GETITEMCOUNT, 0, 0 );
-					lvi.lParam = ( LPARAM )ci;	// lParam = our contactinfo structure from the connection thread.
+					lvi.iItem = ( int )_SendMessageW( g_hWnd_contact_list, LVM_GETITEMCOUNT, 0, 0 );
+					lvi.lParam = ( LPARAM )ci;	// lParam = our contact_info structure from the connection thread.
 					_SendMessageW( g_hWnd_contact_list, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
 				}
 				
@@ -1836,164 +2155,52 @@ THREAD_RETURN update_contact_list( void *pArguments )
 		}
 		else if ( cui->action == 3 )	// Update a contact.
 		{
-			contactinfo *ci = cui->old_ci;
+			contact_info *ci = cui->old_ci;
 
 			if ( ci != NULL )
 			{
-				contactinfo *uci = cui->new_ci;	// Free uci when done.
+				contact_info *uci = cui->new_ci;	// Free uci when done.
 
 				if ( uci != NULL )
 				{
-					if ( uci->contact.first_name != NULL )
+					for ( char i = 0, j = 0; i < 16; ++i )
 					{
-						GlobalFree( ci->contact.first_name );
-						ci->contact.first_name = uci->contact.first_name;
-						GlobalFree( ci->first_name );
-						ci->first_name = uci->first_name;
-					}
+						switch ( i )
+						{
+							case 0:
+							case 4:
+							case 6:
+							case 10:
+							case 11:
+							case 15:
+							{
+								if ( uci->w_contact_info_phone_numbers[ j ] != NULL )
+								{
+									remove_custom_caller_id_w( ci );
 
-					if ( uci->contact.last_name != NULL )
-					{
-						GlobalFree( ci->contact.last_name );
-						ci->contact.last_name = uci->contact.last_name;
-						GlobalFree( ci->last_name );
-						ci->last_name = uci->last_name;
-					}
+									GlobalFree( ci->w_contact_info_phone_numbers[ j ] );
+									ci->w_contact_info_phone_numbers[ j ] = uci->w_contact_info_phone_numbers[ j ];
 
-					if ( uci->contact.nickname != NULL )
-					{
-						GlobalFree( ci->contact.nickname );
-						ci->contact.nickname = uci->contact.nickname;
-						GlobalFree( ci->nickname );
-						ci->nickname = uci->nickname;
-					}
+									GlobalFree( ci->w_contact_info_values[ i ] );
+									ci->w_contact_info_values[ i ] = FormatPhoneNumberW( ci->w_contact_info_phone_numbers[ j ] );
 
-					if ( uci->contact.title != NULL )
-					{
-						GlobalFree( ci->contact.title );
-						ci->contact.title = uci->contact.title;
-						GlobalFree( ci->title );
-						ci->title = uci->title;
-					}
+									add_custom_caller_id_w( ci );
+								}
+								
+								++j;
+							}
+							break;
 
-					if ( uci->contact.business_name != NULL )
-					{
-						GlobalFree( ci->contact.business_name );
-						ci->contact.business_name = uci->contact.business_name;
-						GlobalFree( ci->business_name );
-						ci->business_name = uci->business_name;
-					}
-
-					if ( uci->contact.designation != NULL )
-					{
-						GlobalFree( ci->contact.designation );
-						ci->contact.designation = uci->contact.designation;
-						GlobalFree( ci->designation );
-						ci->designation = uci->designation;
-					}
-
-					if ( uci->contact.department != NULL )
-					{
-						GlobalFree( ci->contact.department );
-						ci->contact.department = uci->contact.department;
-						GlobalFree( ci->department );
-						ci->department = uci->department;
-					}
-
-					if ( uci->contact.category != NULL )
-					{
-						GlobalFree( ci->contact.category );
-						ci->contact.category = uci->contact.category;
-						GlobalFree( ci->category );
-						ci->category = uci->category;
-					}
-
-					if ( uci->contact.email_address != NULL )
-					{
-						GlobalFree( ci->contact.email_address );
-						ci->contact.email_address = uci->contact.email_address;
-						GlobalFree( ci->email_address );
-						ci->email_address = uci->email_address;
-					}
-
-					if ( uci->contact.web_page != NULL )
-					{
-						GlobalFree( ci->contact.web_page );
-						ci->contact.web_page = uci->contact.web_page;
-						GlobalFree( ci->web_page );
-						ci->web_page = uci->web_page;
-					}
-
-					if ( uci->contact.home_phone_number != NULL )
-					{
-						remove_custom_caller_id( ci );
-
-						GlobalFree( ci->contact.home_phone_number );
-						ci->contact.home_phone_number = uci->contact.home_phone_number;
-						GlobalFree( ci->home_phone_number );
-						ci->home_phone_number = FormatPhoneNumber( ci->contact.home_phone_number );
-
-						add_custom_caller_id( ci );
-					}
-
-					if ( uci->contact.cell_phone_number != NULL )
-					{
-						remove_custom_caller_id( ci );
-
-						GlobalFree( ci->contact.cell_phone_number );
-						ci->contact.cell_phone_number = uci->contact.cell_phone_number;
-						GlobalFree( ci->cell_phone_number );
-						ci->cell_phone_number = FormatPhoneNumber( ci->contact.cell_phone_number );
-
-						add_custom_caller_id( ci );
-					}
-
-					if ( uci->contact.office_phone_number != NULL )
-					{
-						remove_custom_caller_id( ci );
-
-						GlobalFree( ci->contact.office_phone_number );
-						ci->contact.office_phone_number = uci->contact.office_phone_number;
-						GlobalFree( ci->office_phone_number );
-						ci->office_phone_number = FormatPhoneNumber( ci->contact.office_phone_number );
-
-						add_custom_caller_id( ci );
-					}
-
-					if ( uci->contact.other_phone_number != NULL )
-					{
-						remove_custom_caller_id( ci );
-
-						GlobalFree( ci->contact.other_phone_number );
-						ci->contact.other_phone_number = uci->contact.other_phone_number;
-						GlobalFree( ci->other_phone_number );
-						ci->other_phone_number = FormatPhoneNumber( ci->contact.other_phone_number );
-
-						add_custom_caller_id( ci );
-					}
-
-					if ( uci->contact.work_phone_number != NULL )
-					{
-						remove_custom_caller_id( ci );
-
-						GlobalFree( ci->contact.work_phone_number );
-						ci->contact.work_phone_number = uci->contact.work_phone_number;
-						GlobalFree( ci->work_phone_number );
-						ci->work_phone_number = FormatPhoneNumber( ci->contact.work_phone_number );
-
-						add_custom_caller_id( ci );
-					}
-
-					if ( uci->contact.fax_number != NULL )
-					{
-						remove_custom_caller_id( ci );
-
-						GlobalFree( ci->contact.fax_number );
-						ci->contact.fax_number = uci->contact.fax_number;
-						GlobalFree( ci->fax_number );
-						ci->fax_number = FormatPhoneNumber( ci->contact.fax_number );
-
-						add_custom_caller_id( ci );
+							default:
+							{
+								if ( uci->w_contact_info_values[ i ] != NULL )
+								{
+									GlobalFree( ci->w_contact_info_values[ i ] );
+									ci->w_contact_info_values[ i ] = uci->w_contact_info_values[ i ];
+								}
+							}
+							break;
+						}
 					}
 
 					if ( uci->picture_path != NULL || cui->remove_picture )
@@ -2002,7 +2209,7 @@ THREAD_RETURN update_contact_list( void *pArguments )
 						ci->picture_path = uci->picture_path;
 					}
 
-					ci->ringtone_info = uci->ringtone_info;
+					ci->rti = uci->rti;
 
 					GlobalFree( uci );
 
@@ -2040,9 +2247,9 @@ THREAD_RETURN update_call_log( void *pArguments )
 
 	in_worker_thread = true;
 
-	char range_number[ 32 ];
+	wchar_t range_number[ 32 ];
 
-	displayinfo *di = ( displayinfo * )pArguments;
+	display_info *di = ( display_info * )pArguments;
 
 	MESSAGE_LOG_OUTPUT( ML_NOTICE, ST_Received_incoming_caller_ID_information )
 
@@ -2054,11 +2261,11 @@ THREAD_RETURN update_call_log( void *pArguments )
 		DoublyLinkedList *di_node = DLL_CreateNode( ( void * )di );
 
 		// See if our tree has the phone number to add the node to.
-		DoublyLinkedList *dll = ( DoublyLinkedList * )dllrbt_find( call_log, ( void * )di->ci.call_from, true );
+		DoublyLinkedList *dll = ( DoublyLinkedList * )dllrbt_find( call_log, ( void * )di->phone_number, true );
 		if ( dll == NULL )
 		{
 			// If no phone number exits, insert the node into the tree.
-			if ( dllrbt_insert( call_log, ( void * )di->ci.call_from, ( void * )di_node ) != DLLRBT_STATUS_OK )
+			if ( dllrbt_insert( call_log, ( void * )di->phone_number, ( void * )di_node ) != DLLRBT_STATUS_OK )
 			{
 				GlobalFree( di_node );	// This shouldn't happen.
 			}
@@ -2074,86 +2281,199 @@ THREAD_RETURN update_call_log( void *pArguments )
 			call_log_changed = true;
 		}
 
-		// Search the ignore_list for a match.
-		ignoreinfo *ii = ( ignoreinfo * )dllrbt_find( ignore_list, ( void * )di->ci.call_from, true );
+		// Search our lists.
+		// The allow lists have precedence over the ignore lists.
+		// The phone number list has precedence over the caller ID name list.
+		unsigned char update_type = 0;	// 0 = None, 1 = allow_list, 2 = allow_cid_list, 3 = ignore_list, 4 = ignore_cid_list.
+
+		// Search the allow_list for a match.
+		allow_ignore_info *a_aii = ( allow_ignore_info * )dllrbt_find( allow_list, ( void * )di->phone_number, true );
 
 		// Try searching the range list.
-		if ( ii == NULL )
+		if ( a_aii == NULL )
 		{
-			_memzero( range_number, 32 );
+			_memzero( range_number, 32 * sizeof( wchar_t ) );
 
-			int range_index = lstrlenA( di->ci.call_from );
+			int range_index = lstrlenW( di->phone_number );
 			range_index = ( range_index > 0 ? range_index - 1 : 0 );
 
-			if ( RangeSearch( &ignore_range_list[ range_index ], di->ci.call_from, range_number ) )
+			if ( RangeSearch( &allow_range_list[ range_index ], di->phone_number, range_number ) )
 			{
-				ii = ( ignoreinfo * )dllrbt_find( ignore_list, ( void * )range_number, true );
+				a_aii = ( allow_ignore_info * )dllrbt_find( allow_list, ( void * )range_number, true );
 			}
 		}
 
-		if ( ii != NULL )
+		if ( a_aii != NULL )
 		{
-			di->process_incoming = false;
-			di->ignore_phone_number = true;
-			di->ci.ignored = true;
+			update_type = 1;
 
-			IgnoreIncomingCall( di->incoming_call );
+			di->allow_phone_number = true;	// Show Yes in the Allow Phone Number column.
+		}
 
-			ignoreupdateinfo *iui = ( ignoreupdateinfo * )GlobalAlloc( GMEM_FIXED, sizeof( ignoreupdateinfo ) );
-			iui->ii = ii;
-			iui->phone_number = NULL;
-			iui->action = 3;	// Update the call count.
-			iui->hWnd = g_hWnd_ignore_list;
-
-			// iui is freed in the update_ignore_list thread.
-			HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL );
-			if ( thread != NULL )
+		// Search for the first allow caller ID list match. di->allow_cid_match_count will be updated here for all keyword matches.
+		allow_ignore_cid_info *a_aicidi = find_caller_id_name_match( di, allow_cid_list, LIST_TYPE_ALLOW );
+		if ( a_aii == NULL && a_aicidi != NULL )
+		{
+			if ( update_type == 0 )
 			{
-				CloseHandle( thread );
-			}
-			else
-			{
-				GlobalFree( iui );
+				update_type = 2;
 			}
 		}
-		else
-		{
-			// Search for the first ignore caller ID list match. di->ignore_cid_match_count will be updated here for all keyword matches.
-			ignorecidinfo *icidi = find_ignore_caller_id_name_match( di );
-			if ( icidi != NULL )
-			{
-				di->process_incoming = false;
-				di->ci.ignored = true;
 
+		// Search the ignore_list for a match.
+		allow_ignore_info *i_aii = ( allow_ignore_info * )dllrbt_find( ignore_list, ( void * )di->phone_number, true );
+
+		// Try searching the range list.
+		if ( i_aii == NULL )
+		{
+			_memzero( range_number, 32 * sizeof( wchar_t ) );
+
+			int range_index = lstrlenW( di->phone_number );
+			range_index = ( range_index > 0 ? range_index - 1 : 0 );
+
+			if ( RangeSearch( &ignore_range_list[ range_index ], di->phone_number, range_number ) )
+			{
+				i_aii = ( allow_ignore_info * )dllrbt_find( ignore_list, ( void * )range_number, true );
+			}
+		}
+
+		if ( i_aii != NULL )
+		{
+			if ( update_type == 0 )
+			{
 				IgnoreIncomingCall( di->incoming_call );
 
-				ignorecidupdateinfo *icidui = ( ignorecidupdateinfo * )GlobalAlloc( GMEM_FIXED, sizeof( ignorecidupdateinfo ) );
-				icidui->icidi = icidi;
-				icidui->caller_id = NULL;
-				icidui->action = 4;	// Update the call count.
-				icidui->hWnd = g_hWnd_ignore_cid_list;
-				icidui->match_case = false;
-				icidui->match_whole_word = false;
+				di->ignored = true;	// The incoming call was ignored (display the call log text in red).
 
-				// icidui is freed in the update_ignore_cid_list thread.
-				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_cid_list, ( void * )icidui, 0, NULL );
+				di->process_incoming = false;	// Don't display the Ignore Incoming Call menu item.
+
+				update_type = 3;
+			}
+
+			di->ignore_phone_number = true;	// Show Yes in the Ignore Phone Number column.
+		}
+
+		// Search for the first ignore caller ID list match. di->ignore_cid_match_count will be updated here for all keyword matches.
+		allow_ignore_cid_info *i_aicidi = find_caller_id_name_match( di, ignore_cid_list, LIST_TYPE_IGNORE );
+		if ( i_aii == NULL && i_aicidi != NULL )
+		{
+			if ( update_type == 0 )
+			{
+				IgnoreIncomingCall( di->incoming_call );
+
+				di->ignored = true;	// The incoming call was ignored (display the call log text in red).
+
+				di->process_incoming = false;	// Don't display the Ignore Incoming Call menu item.
+
+				update_type = 4;
+			}
+		}
+
+		switch ( update_type )
+		{
+			case 1:	// Allow List
+			{
+				allow_ignore_update_info *aiui = ( allow_ignore_update_info * )GlobalAlloc( GMEM_FIXED, sizeof( allow_ignore_update_info ) );
+				aiui->last_called.QuadPart = di->time.QuadPart;
+				aiui->aii = a_aii;
+				aiui->phone_number = NULL;
+				aiui->action = 4;	// Update the call count and last called time.
+				aiui->list_type = LIST_TYPE_ALLOW;	// Allow list.
+				aiui->hWnd = g_hWnd_allow_list;
+
+				// aiui is freed in the update_allow_ignore_list thread.
+				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_list, ( void * )aiui, 0, NULL );
 				if ( thread != NULL )
 				{
 					CloseHandle( thread );
 				}
 				else
 				{
-					GlobalFree( icidui );
+					GlobalFree( aiui );
 				}
 			}
+			break;
+
+			case 2:	// Allow Caller ID List
+			{
+				allow_ignore_cid_update_info *aicidui = ( allow_ignore_cid_update_info * )GlobalAlloc( GMEM_FIXED, sizeof( allow_ignore_cid_update_info ) );
+				aicidui->last_called.QuadPart = di->time.QuadPart;
+				aicidui->aicidi = a_aicidi;
+				aicidui->caller_id = NULL;
+				aicidui->action = 4;	// Update the call count and last called time.
+				aicidui->list_type = LIST_TYPE_ALLOW;	// Allow list.
+				aicidui->hWnd = g_hWnd_allow_cid_list;
+				aicidui->match_flag = 0x00;
+
+				// aicidui is freed in the update_allow_ignore_cid_list thread.
+				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_cid_list, ( void * )aicidui, 0, NULL );
+				if ( thread != NULL )
+				{
+					CloseHandle( thread );
+				}
+				else
+				{
+					GlobalFree( aicidui );
+				}
+			}
+			break;
+
+			case 3:	// Ignore List
+			{
+				allow_ignore_update_info *aiui = ( allow_ignore_update_info * )GlobalAlloc( GMEM_FIXED, sizeof( allow_ignore_update_info ) );
+				aiui->last_called.QuadPart = di->time.QuadPart;
+				aiui->aii = i_aii;
+				aiui->phone_number = NULL;
+				aiui->action = 4;	// Update the call count and last called time.
+				aiui->list_type = LIST_TYPE_IGNORE;	// Ignore list.
+				aiui->hWnd = g_hWnd_ignore_list;
+
+				// aiui is freed in the update_allow_ignore_list thread.
+				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_list, ( void * )aiui, 0, NULL );
+				if ( thread != NULL )
+				{
+					CloseHandle( thread );
+				}
+				else
+				{
+					GlobalFree( aiui );
+				}
+			}
+			break;
+
+			case 4: // Ignore Caller ID List
+			{
+				allow_ignore_cid_update_info *aicidui = ( allow_ignore_cid_update_info * )GlobalAlloc( GMEM_FIXED, sizeof( allow_ignore_cid_update_info ) );
+				aicidui->last_called.QuadPart = di->time.QuadPart;
+				aicidui->aicidi = i_aicidi;
+				aicidui->caller_id = NULL;
+				aicidui->action = 4;	// Update the call count and last called time.
+				aicidui->list_type = LIST_TYPE_IGNORE;	// Ignore list.
+				aicidui->hWnd = g_hWnd_ignore_cid_list;
+				aicidui->match_flag = 0x00;
+
+				// aicidui is freed in the update_allow_ignore_cid_list thread.
+				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_cid_list, ( void * )aicidui, 0, NULL );
+				if ( thread != NULL )
+				{
+					CloseHandle( thread );
+				}
+				else
+				{
+					GlobalFree( aicidui );
+				}
+			}
+			break;
 		}
 
 		// If the incoming number matches a contact, then update the caller ID value.
-		char *custom_caller_id = get_custom_caller_id( di->ci.call_from, &di->contact_info );
-		if ( custom_caller_id != NULL )
+		di->custom_caller_id = get_custom_caller_id_w( di->phone_number, &di->ci );
+
+		di->w_phone_number = FormatPhoneNumberW( di->phone_number );
+
+		if ( di->time.QuadPart > 0 )
 		{
-			GlobalFree( di->ci.caller_id );
-			di->ci.caller_id = custom_caller_id;
+			di->w_time = FormatTimestamp( di->time );
 		}
 
 		_SendNotifyMessageW( g_hWnd_main, WM_PROPAGATE, MAKEWPARAM( CW_MODIFY, 0 ), ( LPARAM )di );	// Add entry to listview and show popup.
@@ -2220,22 +2540,12 @@ THREAD_RETURN copy_items( void *pArguments )
 
 	unsigned column_type = 0;
 
-	if ( hWnd == g_hWnd_call_log )
-	{
-		column_type = 0;
-	}
-	else if ( hWnd == g_hWnd_contact_list )
-	{
-		column_type = 1;
-	}
-	else if ( hWnd == g_hWnd_ignore_list )
-	{
-		column_type = 2;
-	}
-	else if ( hWnd == g_hWnd_ignore_cid_list )
-	{
-		column_type = 3;
-	}
+	if		( hWnd == g_hWnd_allow_list )		{ column_type = 0; }
+	else if ( hWnd == g_hWnd_allow_cid_list )	{ column_type = 1; }
+	else if ( hWnd == g_hWnd_call_log )			{ column_type = 2; }
+	else if ( hWnd == g_hWnd_contact_list )		{ column_type = 3; }
+	else if ( hWnd == g_hWnd_ignore_list )		{ column_type = 4; }
+	else if ( hWnd == g_hWnd_ignore_cid_list )	{ column_type = 5; }
 
 	Processing_Window( hWnd, false );
 
@@ -2244,8 +2554,8 @@ THREAD_RETURN copy_items( void *pArguments )
 	lvi.mask = LVIF_PARAM;
 	lvi.iItem = -1;	// Set this to -1 so that the LVM_GETNEXTITEM call can go through the list correctly.
 
-	int item_count = _SendMessageW( hWnd, LVM_GETITEMCOUNT, 0, 0 );
-	int sel_count = _SendMessageW( hWnd, LVM_GETSELECTEDCOUNT, 0, 0 );
+	int item_count = ( int )_SendMessageW( hWnd, LVM_GETITEMCOUNT, 0, 0 );
+	int sel_count = ( int )_SendMessageW( hWnd, LVM_GETSELECTEDCOUNT, 0, 0 );
 	
 	bool copy_all = false;
 	if ( item_count == sel_count )
@@ -2271,30 +2581,27 @@ THREAD_RETURN copy_items( void *pArguments )
 
 	if ( c_i->column == MENU_COPY_SEL )
 	{
-		column_end = ( column_type == 0 ? total_columns1 :
-					 ( column_type == 1 ? total_columns2 :
-					 ( column_type == 2 ? total_columns3 : total_columns4 ) ) );
+		switch ( column_type )
+		{
+			case 0: { column_end = g_total_columns1; } break;
+			case 1: { column_end = g_total_columns2; } break;
+			case 2: { column_end = g_total_columns3; } break;
+			case 3: { column_end = g_total_columns4; } break;
+			case 4: { column_end = g_total_columns5; } break;
+			case 5: { column_end = g_total_columns6; } break;
+		}
+
 		_SendMessageW( hWnd, LVM_GETCOLUMNORDERARRAY, column_end, ( LPARAM )arr );
 
-		if ( column_type == 0 )
+		// Offset the virtual indices to match the actual index.
+		switch ( column_type )
 		{
-			// Offset the virtual indices to match the actual index.
-			OffsetVirtualIndices( arr, call_log_columns, NUM_COLUMNS1, total_columns1 );
-		}
-		else if ( column_type == 1 )
-		{
-			// Offset the virtual indices to match the actual index.
-			OffsetVirtualIndices( arr, contact_list_columns, NUM_COLUMNS2, total_columns2 );
-		}
-		else if ( column_type == 2 )
-		{
-			// Offset the virtual indices to match the actual index.
-			OffsetVirtualIndices( arr, ignore_list_columns, NUM_COLUMNS3, total_columns3 );
-		}
-		else if ( column_type == 3 )
-		{
-			// Offset the virtual indices to match the actual index.
-			OffsetVirtualIndices( arr, ignore_cid_list_columns, NUM_COLUMNS4, total_columns4 );
+			case 0: { OffsetVirtualIndices( arr, allow_list_columns, NUM_COLUMNS1, g_total_columns1 ); } break;
+			case 1: { OffsetVirtualIndices( arr, allow_cid_list_columns, NUM_COLUMNS2, g_total_columns2 ); } break;
+			case 2: { OffsetVirtualIndices( arr, call_log_columns, NUM_COLUMNS3, g_total_columns3 ); } break;
+			case 3: { OffsetVirtualIndices( arr, contact_list_columns, NUM_COLUMNS4, g_total_columns4 ); } break;
+			case 4: { OffsetVirtualIndices( arr, ignore_list_columns, NUM_COLUMNS5, g_total_columns5 ); } break;
+			case 5: { OffsetVirtualIndices( arr, ignore_cid_list_columns, NUM_COLUMNS6, g_total_columns6 ); } break;
 		}
 	}
 	else
@@ -2313,6 +2620,7 @@ THREAD_RETURN copy_items( void *pArguments )
 
 			case MENU_COPY_SEL_COL3:
 			case MENU_COPY_SEL_COL23:
+			case MENU_COPY_SEL_COL33:
 			case MENU_COPY_SEL_COL43: { arr[ 0 ] = 3; } break;
 
 			case MENU_COPY_SEL_COL4:
@@ -2320,10 +2628,16 @@ THREAD_RETURN copy_items( void *pArguments )
 			case MENU_COPY_SEL_COL44: { arr[ 0 ] = 4; } break;
 
 			case MENU_COPY_SEL_COL5:
-			case MENU_COPY_SEL_COL25: { arr[ 0 ] = 5; } break;
+			case MENU_COPY_SEL_COL25:
+			case MENU_COPY_SEL_COL45: { arr[ 0 ] = 5; } break;
 
-			case MENU_COPY_SEL_COL26: { arr[ 0 ] = 6; } break;
+			case MENU_COPY_SEL_COL6:
+			case MENU_COPY_SEL_COL26:
+			case MENU_COPY_SEL_COL46: { arr[ 0 ] = 6; } break;
+
+			case MENU_COPY_SEL_COL7:
 			case MENU_COPY_SEL_COL27: { arr[ 0 ] = 7; } break;
+
 			case MENU_COPY_SEL_COL28: { arr[ 0 ] = 8; } break;
 			case MENU_COPY_SEL_COL29: { arr[ 0 ] = 9; } break;
 			case MENU_COPY_SEL_COL210: { arr[ 0 ] = 10; } break;
@@ -2336,6 +2650,7 @@ THREAD_RETURN copy_items( void *pArguments )
 		}
 	}
 
+	wchar_t tbuf[ 512 ];
 	wchar_t *copy_string = NULL;
 	bool add_newline = false;
 	bool add_tab = false;
@@ -2355,83 +2670,100 @@ THREAD_RETURN copy_items( void *pArguments )
 		}
 		else
 		{
-			lvi.iItem = _SendMessageW( hWnd, LVM_GETNEXTITEM, lvi.iItem, LVNI_SELECTED );
+			lvi.iItem = ( int )_SendMessageW( hWnd, LVM_GETNEXTITEM, lvi.iItem, LVNI_SELECTED );
 		}
 
 		_SendMessageW( hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi );
 
-		displayinfo *di = NULL;
-		contactinfo *ci = NULL;
-		ignoreinfo *ii = NULL;
-		ignorecidinfo *icidi = NULL;
+		display_info *di = NULL;
+		contact_info *ci = NULL;
+		allow_ignore_info *aii = NULL;
+		allow_ignore_cid_info *aicidi = NULL;
 
-		if ( column_type == 0 )
+		switch ( column_type )
 		{
-			di = ( displayinfo * )lvi.lParam;
-		}
-		else if ( column_type == 1 )
-		{
-			ci = ( contactinfo * )lvi.lParam;
-		}
-		else if ( column_type == 2 )
-		{
-			ii = ( ignoreinfo * )lvi.lParam;
-		}
-		else if ( column_type == 3 )
-		{
-			icidi = ( ignorecidinfo * )lvi.lParam;
+			case 0:
+			case 4: { aii = ( allow_ignore_info * )lvi.lParam; } break;
+			case 1:
+			case 5: { aicidi = ( allow_ignore_cid_info * )lvi.lParam; } break;
+			case 2: { di = ( display_info * )lvi.lParam; } break;
+			case 3: { ci = ( contact_info * )lvi.lParam; } break;
 		}
 
 		add_newline = add_tab = false;
 
 		for ( int j = column_start; j < column_end; ++j )
 		{
-			switch ( arr[ j ] )
+			copy_string = NULL;
+
+			int index;
+			if ( arr[ j ] > 0 )
 			{
-				case 1:
-				case 2:
-				{
-					copy_string = ( column_type == 0 ? di->display_values[ arr[ j ] - 1 ] :
-								  ( column_type == 1 ? ci->contactinfo_values[ arr[ j ] - 1 ] :
-								  ( column_type == 2 ? ii->ignoreinfo_values[ arr[ j ] - 1 ] : icidi->ignorecidinfo_values[ arr[ j ] - 1 ] ) ) );
-				}
-				break;
+				index = arr[ j ] - 1;
 
-				case 3:
+				if ( column_type == 2 )
 				{
-					copy_string = ( column_type == 0 ? di->display_values[ arr[ j ] - 1 ] :
-								  ( column_type == 1 ? ci->contactinfo_values[ arr[ j ] - 1 ] : icidi->ignorecidinfo_values[ arr[ j ] - 1 ] ) );
-				}
-				break;
+					switch ( index )
+					{
+						case 0: { copy_string = ( di->allow_cid_match_count > 0 ? ST_Yes : ST_No ); } break;
+						case 1: { copy_string = ( di->allow_phone_number ? ST_Yes : ST_No ); } break;
+						case 2:
+						{
+							if ( di->custom_caller_id != NULL )
+							{
+								copy_string = tbuf;	// Reset the buffer pointer.
 
-				case 4:
-				{
-					copy_string = ( column_type == 0 ? di->display_values[ arr[ j ] - 1 ] :
-								  ( column_type == 1 ? ci->contactinfo_values[ arr[ j ] - 1 ] : icidi->ignorecidinfo_values[ arr[ j ] - 1 ] ) );
+								__snwprintf( copy_string, 512, L"%s (%s)", di->custom_caller_id, di->caller_id );
+							}
+							else
+							{
+								copy_string = di->caller_id;
+							}
+						}
+						break;
+						case 3: { copy_string = di->w_time; } break;
+						case 4: { copy_string = ( di->ignore_cid_match_count > 0 ? ST_Yes : ST_No ); } break;
+						case 5: { copy_string = ( di->ignore_phone_number ? ST_Yes : ST_No ); } break;
+						case 6: { copy_string = di->w_phone_number; } break;
+					}
 				}
-				break;
+				else if ( column_type == 3 )
+				{
+					copy_string = ci->w_contact_info_values[ index ];
+				}
+				else if ( column_type == 0 || column_type == 4 )
+				{
+					switch ( index )
+					{
+						case 0: { copy_string = aii->w_last_called; } break;
+						case 1: { copy_string = aii->w_phone_number; } break;
+						case 2:
+						{
+							copy_string = tbuf;	// Reset the buffer pointer.
 
-				case 5:
-				case 6:
-				case 7:
-				case 8:
-				case 9:
-				case 10:
-				{
-					copy_string = ( column_type == 0 ? di->display_values[ arr[ j ] - 1 ] : ci->contactinfo_values[ arr[ j ] - 1 ] );
+							__snwprintf( copy_string, 11, L"%lu", aii->count );
+						}
+						break;
+					}
 				}
-				break;
+				else if ( column_type == 1 || column_type == 5 )
+				{
+					switch ( index )
+					{
+						case 0: { copy_string = aicidi->caller_id; } break;
+						case 1: { copy_string = aicidi->w_last_called; } break;
+						case 2: { copy_string = ( ( aicidi->match_flag & 0x02 ) ? ST_Yes : ST_No ); } break;
+						case 3: { copy_string = ( ( aicidi->match_flag & 0x01 ) ? ST_Yes : ST_No ); } break;
+						case 4: { copy_string = ( ( aicidi->match_flag & 0x04 ) ? ST_Yes : ST_No ); } break;
+						case 5:
+						{
+							copy_string = tbuf;	// Reset the buffer pointer.
 
-				case 11:
-				case 12:
-				case 13:
-				case 14:
-				case 15:
-				case 16:
-				{
-					copy_string = ci->contactinfo_values[ arr[ j ] - 1 ];
+							__snwprintf( copy_string, 11, L"%lu", aicidi->count );
+						}
+						break;
+					}
 				}
-				break;
 			}
 
 			if ( copy_string == NULL || ( copy_string != NULL && copy_string[ 0 ] == NULL ) )
@@ -2519,6 +2851,183 @@ CLEANUP:
 	GlobalFree( c_i );
 
 	Processing_Window( hWnd, true );
+
+	// Release the semaphore if we're killing the thread.
+	if ( worker_semaphore != NULL )
+	{
+		ReleaseSemaphore( worker_semaphore, 1, NULL );
+	}
+
+	in_worker_thread = false;
+
+	// We're done. Let other threads continue.
+	LeaveCriticalSection( &pe_cs );
+
+	_ExitThread( 0 );
+	return 0;
+}
+
+THREAD_RETURN search_list( void *pArguments )
+{
+	SEARCH_INFO *si = ( SEARCH_INFO * )pArguments;
+
+	// This will block every other thread from entering until the first thread is complete.
+	EnterCriticalSection( &pe_cs );
+
+	in_worker_thread = true;
+
+	Processing_Window( g_hWnd_call_log, false );
+
+	if ( si != NULL )
+	{
+		if ( si->text != NULL )
+		{
+			LVITEM lvi, new_lvi;
+
+			_memzero( &lvi, sizeof( LVITEM ) );
+			lvi.mask = LVIF_PARAM | LVIF_STATE;
+			lvi.stateMask = LVIS_FOCUSED | LVIS_SELECTED;
+
+			_memzero( &new_lvi, sizeof( LVITEM ) );
+			new_lvi.mask = LVIF_STATE;
+			new_lvi.state = LVIS_FOCUSED | LVIS_SELECTED;
+			new_lvi.stateMask = LVIS_FOCUSED | LVIS_SELECTED;
+
+			int item_count = ( int )_SendMessageW( g_hWnd_call_log, LVM_GETITEMCOUNT, 0, 0 );
+
+			int current_item_index;
+
+			if ( si->search_all )
+			{
+				current_item_index = 0;
+			}
+			else
+			{
+				current_item_index = ( int )_SendMessageW( g_hWnd_call_log, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED ) + 1;
+			}
+
+			// Go through each item, and delete the file.
+			for ( int i = 0; i < item_count; ++i, ++current_item_index )
+			{
+				// Stop processing and exit the thread.
+				if ( kill_worker_thread_flag )
+				{
+					break;
+				}
+
+				if ( current_item_index >= item_count )
+				{
+					current_item_index = 0;
+				}
+
+				lvi.iItem = current_item_index;
+				_SendMessageW( g_hWnd_call_log, LVM_GETITEM, 0, ( LPARAM )&lvi );
+
+				display_info *di = ( display_info * )lvi.lParam;
+
+				if ( di != NULL )
+				{
+					bool found_match = false;
+
+					wchar_t *text = ( si->type == 1 ? di->w_phone_number : di->caller_id );
+
+					if ( si->search_flag == 0x04 )	// Regular expression search.
+					{
+						int error_code;
+						size_t error_offset;
+
+						if ( g_use_regular_expressions )
+						{
+							pcre2_code *regex_code = _pcre2_compile_16( ( PCRE2_SPTR16 )si->text, PCRE2_ZERO_TERMINATED, 0, &error_code, &error_offset, NULL );
+
+							if ( regex_code != NULL )
+							{
+								pcre2_match_data *match = _pcre2_match_data_create_from_pattern_16( regex_code, NULL );
+
+								if ( match != NULL )
+								{
+									if ( _pcre2_match_16( regex_code, ( PCRE2_SPTR16 )text, lstrlenW( text ), 0, 0, match, NULL ) >= 0 )
+									{
+										found_match = true;
+									}
+
+									_pcre2_match_data_free_16( match );
+								}
+
+								_pcre2_code_free_16( regex_code );
+							}
+						}
+					}
+					else
+					{
+						if ( si->search_flag == ( 0x01 | 0x02 ) )	// Match case and whole word.
+						{
+							if ( lstrcmpW( text, si->text ) == 0 )
+							{
+								found_match = true;
+							}
+						}
+						else if ( si->search_flag == 0x02 )	// Match whole word.
+						{
+							if ( lstrcmpiW( text, si->text ) == 0 )
+							{
+								found_match = true;
+							}
+						}
+						else if ( si->search_flag == 0x01 )	// Match case.
+						{
+							if ( _StrStrW( text, si->text ) != NULL )
+							{
+								found_match = true;
+							}
+						}
+						else
+						{
+							if ( _StrStrIW( text, si->text ) != NULL )
+							{
+								found_match = true;
+							}
+						}
+					}
+
+					if ( found_match )
+					{
+						if ( !si->search_all )
+						{
+							new_lvi.state = 0;
+							_SendMessageW( g_hWnd_call_log, LVM_SETITEMSTATE, -1, ( LPARAM )&new_lvi );
+						}
+
+						new_lvi.state = LVIS_FOCUSED | LVIS_SELECTED;
+						_SendMessageW( g_hWnd_call_log, LVM_SETITEMSTATE, current_item_index, ( LPARAM )&new_lvi );
+
+						if ( !si->search_all )
+						{
+							_SendMessageW( g_hWnd_call_log, LVM_ENSUREVISIBLE, current_item_index, FALSE );
+
+							break;
+						}
+					}
+					else
+					{
+						if ( lvi.state & LVIS_SELECTED )
+						{
+							new_lvi.state = 0;
+							_SendMessageW( g_hWnd_call_log, LVM_SETITEMSTATE, current_item_index, ( LPARAM )&new_lvi );
+						}
+					}
+				}
+			}
+
+			GlobalFree( si->text );
+		}
+
+		GlobalFree( si );
+	}
+
+	_SendMessageW( g_hWnd_search, WM_PROPAGATE, 1, 0 );
+
+	Processing_Window( g_hWnd_call_log, true );
 
 	// Release the semaphore if we're killing the thread.
 	if ( worker_semaphore != NULL )

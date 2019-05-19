@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -38,6 +38,7 @@
 	pDestroyMenu			_DestroyMenu;
 	pDestroyWindow			_DestroyWindow;
 	pDispatchMessageW		_DispatchMessageW;
+	pDrawEdge				_DrawEdge;
 	pDrawMenuBar			_DrawMenuBar;
 	pDrawTextW				_DrawTextW;
 	pEmptyClipboard			_EmptyClipboard;
@@ -48,20 +49,22 @@
 	pFillRect				_FillRect;
 	pFlashWindow			_FlashWindow;
 	pGetClientRect			_GetClientRect;
-	pGetClipboardData		_GetClipboardData
+	pGetClipboardData		_GetClipboardData;
 	pGetCursorPos			_GetCursorPos;
 	pGetDC					_GetDC;
-	pGetDlgItem				_GetDlgItem;
+	//pGetDlgItem				_GetDlgItem;
 	pGetKeyState			_GetKeyState;
 	pGetMenuItemInfoW		_GetMenuItemInfoW;
 	pGetMessagePos			_GetMessagePos;
 	pGetMessageW			_GetMessageW;
 	pGetParent				_GetParent;
+	pGetScrollInfo			_GetScrollInfo;
 	pGetSubMenu				_GetSubMenu;
 	pGetSysColor			_GetSysColor;
 	pGetSysColorBrush		_GetSysColorBrush;
 	pGetSystemMetrics		_GetSystemMetrics;
-	pGetWindowLongW			_GetWindowLongW;
+	//pGetWindowLongW			_GetWindowLongW;
+	pGetWindowLongPtrW		_GetWindowLongPtrW;
 	pGetWindowRect			_GetWindowRect;
 	pInsertMenuItemW		_InsertMenuItemW;
 	pInvalidateRect			_InvalidateRect;
@@ -102,7 +105,8 @@
 	pSetScrollInfo			_SetScrollInfo;
 	pSetScrollPos			_SetScrollPos;
 	pSetTimer				_SetTimer;
-	pSetWindowLongW			_SetWindowLongW;
+	//pSetWindowLongW			_SetWindowLongW;
+	pSetWindowLongPtrW		_SetWindowLongPtrW;
 	pSetWindowPos			_SetWindowPos;
 	pSetWindowTextW			_SetWindowTextW;
 	pShowWindow				_ShowWindow;
@@ -145,6 +149,7 @@
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_DestroyMenu, "DestroyMenu" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_DestroyWindow, "DestroyWindow" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_DispatchMessageW, "DispatchMessageW" ) )
+		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_DrawEdge, "DrawEdge" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_DrawMenuBar, "DrawMenuBar" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_DrawTextW, "DrawTextW" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_EmptyClipboard, "EmptyClipboard" ) )
@@ -158,17 +163,19 @@
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetClipboardData, "GetClipboardData" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetCursorPos, "GetCursorPos" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetDC, "GetDC" ) )
-		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetDlgItem, "GetDlgItem" ) )
+		//VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetDlgItem, "GetDlgItem" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetKeyState, "GetKeyState" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetMenuItemInfoW, "GetMenuItemInfoW" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetMessagePos, "GetMessagePos" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetMessageW, "GetMessageW" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetParent, "GetParent" ) )
+		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetScrollInfo, "GetScrollInfo" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetSubMenu, "GetSubMenu" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetSysColor, "GetSysColor" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetSysColorBrush, "GetSysColorBrush" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetSystemMetrics, "GetSystemMetrics" ) )
-		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetWindowLongW, "GetWindowLongW" ) )
+		//VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetWindowLongW, "GetWindowLongW" ) )
+		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetWindowLongPtrW, "GetWindowLongPtrW" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_GetWindowRect, "GetWindowRect" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_InsertMenuItemW, "InsertMenuItemW" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_InvalidateRect, "InvalidateRect" ) )
@@ -209,7 +216,8 @@
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_SetScrollInfo, "SetScrollInfo" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_SetScrollPos, "SetScrollPos" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_SetTimer, "SetTimer" ) )
-		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_SetWindowLongW, "SetWindowLongW" ) )
+		//VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_SetWindowLongW, "SetWindowLongW" ) )
+		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_SetWindowLongPtrW, "SetWindowLongPtrW" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_SetWindowPos, "SetWindowPos" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_SetWindowTextW, "SetWindowTextW" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_user32, ( void ** )&_ShowWindow, "ShowWindow" ) )

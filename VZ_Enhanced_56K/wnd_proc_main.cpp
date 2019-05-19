@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -33,19 +33,21 @@
 #include "telephony.h"
 
 // Object variables
-HWND g_hWnd_columns = NULL;
-HWND g_hWnd_options = NULL;
-HWND g_hWnd_contact = NULL;
-HWND g_hWnd_ignore_phone_number = NULL;
-HWND g_hWnd_ignore_cid = NULL;
 HWND g_hWnd_call_log = NULL;			// Handle to the call log listview control.
 HWND g_hWnd_contact_list = NULL;
 HWND g_hWnd_ignore_tab = NULL;
 HWND g_hWnd_ignore_cid_list = NULL;
 HWND g_hWnd_ignore_list = NULL;
+HWND g_hWnd_allow_tab = NULL;
+HWND g_hWnd_allow_cid_list = NULL;
+HWND g_hWnd_allow_list = NULL;
 HWND g_hWnd_edit = NULL;				// Handle to the listview edit control.
 HWND g_hWnd_tab = NULL;
-HWND g_hWnd_update = NULL;
+
+HWND g_hWnd_tooltip = NULL;
+
+wchar_t *tooltip_buffer = NULL;
+int last_tooltip_item = -1;				// Prevent our hot tracking from calling the tooltip on the same item.
 
 WNDPROC ListsProc = NULL;
 WNDPROC TabListsProc = NULL;
@@ -58,12 +60,14 @@ NOTIFYICONDATA g_nid;					// Tray icon information.
 int cx = 0;								// Current x (left) position of the main window based on the mouse.
 int cy = 0;								// Current y (top) position of the main window based on the mouse.
 
-unsigned char total_tabs = 0;
+unsigned char g_total_tabs = 0;
 
-unsigned char total_columns1 = 0;
-unsigned char total_columns2 = 0;
-unsigned char total_columns3 = 0;
-unsigned char total_columns4 = 0;
+unsigned char g_total_columns1 = 0;
+unsigned char g_total_columns2 = 0;
+unsigned char g_total_columns3 = 0;
+unsigned char g_total_columns4 = 0;
+unsigned char g_total_columns5 = 0;
+unsigned char g_total_columns6 = 0;
 
 bool last_menu = false;		// true if context menu was last open, false if main menu was last open. See: WM_ENTERMENULOOP
 
@@ -109,23 +113,54 @@ VOID CALLBACK SaveTimerProc( HWND hWnd, UINT msg, UINT idTimer, DWORD dwTime )
 // Sort function for columns.
 int CALLBACK CompareFunc( LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort )
 {
-	sortinfo *si = ( sortinfo * )lParamSort;
+	sort_info *si = ( sort_info * )lParamSort;
 
 	int arr[ 17 ];
 
 	if ( si->hWnd == g_hWnd_call_log )
 	{
-		displayinfo *fi1 = ( displayinfo * )( ( si->direction == 1 ) ? lParam1 : lParam2 );
-		displayinfo *fi2 = ( displayinfo * )( ( si->direction == 1 ) ? lParam2 : lParam1 );
+		display_info *fi1 = ( display_info * )( ( si->direction == 1 ) ? lParam1 : lParam2 );
+		display_info *fi2 = ( display_info * )( ( si->direction == 1 ) ? lParam2 : lParam1 );
 
-		_SendMessageW( g_hWnd_call_log, LVM_GETCOLUMNORDERARRAY, total_columns1, ( LPARAM )arr );
+		_SendMessageW( g_hWnd_call_log, LVM_GETCOLUMNORDERARRAY, g_total_columns3, ( LPARAM )arr );
 
 		// Offset the virtual indices to match the actual index.
-		OffsetVirtualIndices( arr, call_log_columns, NUM_COLUMNS1, total_columns1 );
+		OffsetVirtualIndices( arr, call_log_columns, NUM_COLUMNS3, g_total_columns3 );
 
 		switch ( arr[ si->column ] )
 		{
-			case 4:
+			case 1: { return ( fi1->allow_cid_match_count > fi2->allow_cid_match_count ); } break;
+
+			case 2:
+			{
+				if ( fi1->allow_phone_number == fi2->allow_phone_number )
+				{
+					return 0;
+				}
+				else if ( fi1->allow_phone_number && !fi2->allow_phone_number )
+				{
+					return 1;
+				}
+				else
+				{
+					return -1;
+				}
+			}
+			break;
+
+			case 3:
+			{
+				wchar_t *caller_id_1 = ( fi1->custom_caller_id != NULL ? fi1->custom_caller_id : fi1->caller_id );
+				wchar_t *caller_id_2 = ( fi2->custom_caller_id != NULL ? fi2->custom_caller_id : fi2->caller_id );
+
+				return _wcsicmp_s( caller_id_1, caller_id_2 );
+			}
+			break;
+
+			case 4: { return ( fi1->time.QuadPart > fi2->time.QuadPart ); } break;
+			case 5: { return ( fi1->ignore_cid_match_count > fi2->ignore_cid_match_count ); } break;
+
+			case 6:
 			{
 				if ( fi1->ignore_phone_number == fi2->ignore_phone_number )
 				{
@@ -142,12 +177,7 @@ int CALLBACK CompareFunc( LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort )
 			}
 			break;
 
-			case 1: { return _stricmp_s( fi1->ci.caller_id, fi2->ci.caller_id ); } break;
-
-			case 5: { return _wcsicmp_s( fi1->display_values[ arr[ si->column ] - 1 ], fi2->display_values[ arr[ si->column ] - 1 ] ); } break;
-
-			case 2: { return ( fi1->time.QuadPart > fi2->time.QuadPart ); } break;
-			case 3: { return ( fi1->ignore_cid_match_count > fi2->ignore_cid_match_count ); } break;
+			case 7: { return _wcsicmp_s( fi1->w_phone_number, fi2->w_phone_number ); } break;
 
 			default:
 			{
@@ -158,55 +188,31 @@ int CALLBACK CompareFunc( LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort )
 	}
 	else if ( si->hWnd == g_hWnd_contact_list )
 	{
-		contactinfo *fi1 = ( contactinfo * )( ( si->direction == 1 ) ? lParam1 : lParam2 );
-		contactinfo *fi2 = ( contactinfo * )( ( si->direction == 1 ) ? lParam2 : lParam1 );
+		contact_info *fi1 = ( contact_info * )( ( si->direction == 1 ) ? lParam1 : lParam2 );
+		contact_info *fi2 = ( contact_info * )( ( si->direction == 1 ) ? lParam2 : lParam1 );
 
-		_SendMessageW( g_hWnd_contact_list, LVM_GETCOLUMNORDERARRAY, total_columns2, ( LPARAM )arr );
+		_SendMessageW( g_hWnd_contact_list, LVM_GETCOLUMNORDERARRAY, g_total_columns4, ( LPARAM )arr );
 
 		// Offset the virtual indices to match the actual index.
-		OffsetVirtualIndices( arr, contact_list_columns, NUM_COLUMNS2, total_columns2 );
+		OffsetVirtualIndices( arr, contact_list_columns, NUM_COLUMNS4, g_total_columns4 );
 
-		switch ( arr[ si->column ] )
-		{
-			case 1:
-			case 5:
-			case 7:
-			case 11:
-			case 12:
-			case 16: { return _wcsicmp_s( fi1->contactinfo_values[ arr[ si->column ] - 1 ], fi2->contactinfo_values[ arr[ si->column ] - 1 ] ); } break;
-			
-			case 2:
-			case 3:
-			case 4:
-			case 6:
-			case 8:
-			case 9:
-			case 10:
-			case 13:
-			case 14:
-			case 15: { return _stricmp_s( fi1->contact.contact_values[ arr[ si->column ] - 1 ], fi2->contact.contact_values[ arr[ si->column ] - 1 ] ); } break;
-
-			default:
-			{
-				return 0;
-			}
-			break;
-		}	
+		return _wcsicmp_s( fi1->w_contact_info_values[ arr[ si->column ] - 1 ], fi2->w_contact_info_values[ arr[ si->column ] - 1 ] );
 	}
 	else if ( si->hWnd == g_hWnd_ignore_list )
 	{
-		ignoreinfo *fi1 = ( ignoreinfo * )( ( si->direction == 1 ) ? lParam1 : lParam2 );
-		ignoreinfo *fi2 = ( ignoreinfo * )( ( si->direction == 1 ) ? lParam2 : lParam1 );
+		allow_ignore_info *fi1 = ( allow_ignore_info * )( ( si->direction == 1 ) ? lParam1 : lParam2 );
+		allow_ignore_info *fi2 = ( allow_ignore_info * )( ( si->direction == 1 ) ? lParam2 : lParam1 );
 
-		_SendMessageW( g_hWnd_ignore_list, LVM_GETCOLUMNORDERARRAY, total_columns3, ( LPARAM )arr );
+		_SendMessageW( g_hWnd_ignore_list, LVM_GETCOLUMNORDERARRAY, g_total_columns5, ( LPARAM )arr );
 
 		// Offset the virtual indices to match the actual index.
-		OffsetVirtualIndices( arr, ignore_list_columns, NUM_COLUMNS3, total_columns3 );
+		OffsetVirtualIndices( arr, ignore_list_columns, NUM_COLUMNS5, g_total_columns5 );
 
 		switch ( arr[ si->column ] )
 		{
-			case 1: { return _wcsicmp_s( fi1->ignoreinfo_values[ arr[ si->column ] - 1 ], fi2->ignoreinfo_values[ arr[ si->column ] - 1 ] ); } break;
-			case 2:	{ return ( fi1->count > fi2->count ); } break;
+			case 1: { return ( fi1->last_called.QuadPart > fi2->last_called.QuadPart ); } break;
+			case 2: { return _wcsicmp_s( fi1->w_phone_number, fi2->w_phone_number ); } break;
+			case 3:	{ return ( fi1->count > fi2->count ); } break;
 
 			default:
 			{
@@ -217,25 +223,26 @@ int CALLBACK CompareFunc( LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort )
 	}
 	else if ( si->hWnd == g_hWnd_ignore_cid_list )
 	{
-		ignorecidinfo *fi1 = ( ignorecidinfo * )( ( si->direction == 1 ) ? lParam1 : lParam2 );
-		ignorecidinfo *fi2 = ( ignorecidinfo * )( ( si->direction == 1 ) ? lParam2 : lParam1 );
+		allow_ignore_cid_info *fi1 = ( allow_ignore_cid_info * )( ( si->direction == 1 ) ? lParam1 : lParam2 );
+		allow_ignore_cid_info *fi2 = ( allow_ignore_cid_info * )( ( si->direction == 1 ) ? lParam2 : lParam1 );
 
-		_SendMessageW( g_hWnd_ignore_cid_list, LVM_GETCOLUMNORDERARRAY, total_columns4, ( LPARAM )arr );
+		_SendMessageW( g_hWnd_ignore_cid_list, LVM_GETCOLUMNORDERARRAY, g_total_columns6, ( LPARAM )arr );
 
 		// Offset the virtual indices to match the actual index.
-		OffsetVirtualIndices( arr, ignore_cid_list_columns, NUM_COLUMNS4, total_columns4 );
+		OffsetVirtualIndices( arr, ignore_cid_list_columns, NUM_COLUMNS6, g_total_columns6 );
 
 		switch ( arr[ si->column ] )
 		{
-			case 1: { return _stricmp_s( fi1->c_caller_id, fi2->c_caller_id ); } break;
-			
-			case 2:
+			case 1: { return _wcsicmp_s( fi1->caller_id, fi2->caller_id ); } break;
+			case 2: { return ( fi1->last_called.QuadPart > fi2->last_called.QuadPart ); } break;
+
+			case 3:
 			{
-				if ( fi1->match_case == fi2->match_case )
+				if ( ( fi1->match_flag & 0x02 ) == ( fi2->match_flag & 0x02 ) )
 				{
 					return 0;
 				}
-				else if ( fi1->match_case && !fi2->match_case )
+				else if ( ( fi1->match_flag & 0x02 ) && !( fi2->match_flag & 0x02 ) )
 				{
 					return 1;
 				}
@@ -246,13 +253,30 @@ int CALLBACK CompareFunc( LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort )
 			}
 			break;
 
-			case 3:
+			case 4:
 			{
-				if ( fi1->match_whole_word == fi2->match_whole_word )
+				if ( ( fi1->match_flag & 0x01 ) == ( fi2->match_flag & 0x01 ) )
 				{
 					return 0;
 				}
-				else if ( fi1->match_whole_word && !fi2->match_whole_word )
+				else if ( ( fi1->match_flag & 0x01 ) && !( fi2->match_flag & 0x01 ) )
+				{
+					return 1;
+				}
+				else
+				{
+					return -1;
+				}
+			}
+			break;
+
+			case 5:
+			{
+				if ( ( fi1->match_flag & 0x04 ) == ( fi2->match_flag & 0x04 ) )
+				{
+					return 0;
+				}
+				else if ( ( fi1->match_flag & 0x04 ) && !( fi2->match_flag & 0x04 ) )
 				{
 					return 1;
 				}
@@ -263,7 +287,7 @@ int CALLBACK CompareFunc( LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort )
 			}
 			break;
 			
-			case 4:	{ return ( fi1->count > fi2->count ); } break;
+			case 6:	{ return ( fi1->count > fi2->count ); } break;
 
 			default:
 			{
@@ -274,6 +298,135 @@ int CALLBACK CompareFunc( LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort )
 	}
 
 	return 0;
+}
+
+wchar_t *GetListViewInfoString( unsigned char column_info_type, void *info, int column, int item_index, wchar_t *tbuf, unsigned short tbuf_size )
+{
+	wchar_t *buf = NULL;
+
+	switch ( column_info_type )
+	{
+		case 0:
+		case 4:
+		{
+			allow_ignore_info *aii = ( allow_ignore_info * )info;
+
+			switch ( column )
+			{
+				case 0:
+				{
+					buf = tbuf;	// Reset the buffer pointer.
+
+					__snwprintf( buf, tbuf_size, L"%lu", item_index );
+				}
+				break;
+				case 1: { buf = aii->w_last_called; } break;
+				case 2: { buf = aii->w_phone_number; } break;
+				case 3:
+				{
+					buf = tbuf;	// Reset the buffer pointer.
+
+					__snwprintf( buf, tbuf_size, L"%lu", aii->count );
+				}
+				break;
+			}
+		}
+		break;
+	
+		case 1:
+		case 5:
+		{
+			allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )info;
+
+			switch ( column )
+			{
+				case 0:
+				{
+					buf = tbuf;	// Reset the buffer pointer.
+
+					__snwprintf( buf, tbuf_size, L"%lu", item_index );
+				}
+				break;
+				case 1: { buf = aicidi->caller_id; } break;
+				case 2: { buf = aicidi->w_last_called; } break;
+				case 3: { buf = ( ( aicidi->match_flag & 0x02 ) ? ST_Yes : ST_No ); } break;
+				case 4: { buf = ( ( aicidi->match_flag & 0x01 ) ? ST_Yes : ST_No ); } break;
+				case 5: { buf = ( ( aicidi->match_flag & 0x04 ) ? ST_Yes : ST_No ); } break;
+				case 6:
+				{
+					buf = tbuf;	// Reset the buffer pointer.
+
+					__snwprintf( buf, tbuf_size, L"%lu", aicidi->count );
+				}
+				break;
+			}
+		}
+		break;
+
+		case 2:
+		{
+			display_info *di = ( display_info * )info;
+
+			// Save the appropriate text in our buffer for the current column.
+			switch ( column )
+			{
+				case 0:
+				{
+					buf = tbuf;	// Reset the buffer pointer.
+
+					__snwprintf( buf, tbuf_size, L"%lu", item_index );
+				}
+				break;
+				case 1: { buf = ( di->allow_cid_match_count > 0 ? ST_Yes : ST_No ); } break;
+				case 2: { buf = ( di->allow_phone_number ? ST_Yes : ST_No ); } break;
+				case 3: { buf = ( di->custom_caller_id != NULL ? di->custom_caller_id : di->caller_id ); } break;
+				case 4: { buf = di->w_time; } break;
+				case 5: { buf = ( di->ignore_cid_match_count > 0 ? ST_Yes : ST_No ); } break;
+				case 6: { buf = ( di->ignore_phone_number ? ST_Yes : ST_No ); } break;
+				case 7: { buf = di->w_phone_number; } break;
+			}
+		}
+		break;
+	
+		case 3:
+		{
+			contact_info *ci = ( contact_info * )info;
+
+			switch ( column )
+			{
+				case 0:
+				{
+					buf = tbuf;	// Reset the buffer pointer.
+
+					__snwprintf( buf, tbuf_size, L"%lu", item_index );
+				}
+				break;
+				case 1:
+				case 2:
+				case 3:
+				case 4:
+				case 5:
+				case 6:
+				case 7:
+				case 8:
+				case 9:
+				case 10:
+				case 11:
+				case 12:
+				case 13:
+				case 14:
+				case 15:
+				case 16:
+				{
+					buf = ci->w_contact_info_values[ column - 1 ];
+				}
+				break;
+			}
+		}
+		break;
+	}
+
+	return buf;
 }
 
 LRESULT CALLBACK ListsSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
@@ -289,8 +442,10 @@ LRESULT CALLBACK ListsSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
 			if		( hWnd == g_hWnd_call_log )			{ iei->file_type = IE_CALL_LOG_HISTORY; }
 			else if ( hWnd == g_hWnd_contact_list )		{ iei->file_type = IE_CONTACT_LIST; }
+			else if ( hWnd == g_hWnd_allow_cid_list )	{ iei->file_type = IE_ALLOW_CID_LIST; }
+			else if ( hWnd == g_hWnd_allow_list )		{ iei->file_type = IE_ALLOW_PN_LIST; }
 			else if ( hWnd == g_hWnd_ignore_cid_list )	{ iei->file_type = IE_IGNORE_CID_LIST; }
-			else /*if ( hWnd == g_hWnd_ignore_list )*/	{ iei->file_type = IE_IGNORE_PN_LIST; }
+			else if ( hWnd == g_hWnd_ignore_list )		{ iei->file_type = IE_IGNORE_PN_LIST; }
 
 			wchar_t file_path[ MAX_PATH ];
 
@@ -304,7 +459,7 @@ LRESULT CALLBACK ListsSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 				int file_path_length = _DragQueryFileW( ( HDROP )wParam, i, file_path, MAX_PATH ) + 1;	// Include the NULL terminator.
 
 				// Skip any folders that were dropped.
-				if ( ( GetFileAttributesW( file_path ) & FILE_ATTRIBUTE_DIRECTORY ) == 0 )
+				if ( !( GetFileAttributesW( file_path ) & FILE_ATTRIBUTE_DIRECTORY ) )
 				{
 					if ( iei->file_paths == NULL )
 					{
@@ -351,6 +506,136 @@ LRESULT CALLBACK ListsSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 			return 0;
 		}
 		break;
+
+		case WM_NOTIFY:
+		{
+			// Get our listview codes.
+			switch ( ( ( LPNMHDR )lParam )->code )
+			{
+				case HDN_DIVIDERDBLCLICK:
+				{
+					NMHEADER *nmh = ( NMHEADER * )lParam;
+
+					char **columns;
+					unsigned char num_columns;
+					int **columns_width;
+					unsigned char column_info_type;
+
+					if ( hWnd == g_hWnd_allow_list )
+					{
+						columns = allow_list_columns;
+						num_columns = NUM_COLUMNS1;
+						columns_width = allow_list_columns_width;
+						column_info_type = 0;
+					}
+					else if ( hWnd == g_hWnd_allow_cid_list )
+					{
+						columns = allow_cid_list_columns;
+						num_columns = NUM_COLUMNS2;
+						columns_width = allow_cid_list_columns_width;
+						column_info_type = 1;
+					}
+					else if ( hWnd == g_hWnd_call_log )
+					{
+						columns = call_log_columns;
+						num_columns = NUM_COLUMNS3;
+						columns_width = call_log_columns_width;
+						column_info_type = 2;
+					}
+					else if ( hWnd == g_hWnd_contact_list )
+					{
+						columns = contact_list_columns;
+						num_columns = NUM_COLUMNS4;
+						columns_width = contact_list_columns_width;
+						column_info_type = 3;
+					}
+					else if ( hWnd == g_hWnd_ignore_list )
+					{
+						columns = ignore_list_columns;
+						num_columns = NUM_COLUMNS5;
+						columns_width = ignore_list_columns_width;
+						column_info_type = 4;
+					}
+					else if ( hWnd == g_hWnd_ignore_cid_list )
+					{
+						columns = ignore_cid_list_columns;
+						num_columns = NUM_COLUMNS6;
+						columns_width = ignore_cid_list_columns_width;
+						column_info_type = 5;
+					}
+
+					int largest_width;
+
+					int virtual_index = GetVirtualIndexFromColumnIndex( nmh->iItem, columns, num_columns );
+
+					if ( GetKeyState( VK_CONTROL ) & 0x8000 )
+					{
+						largest_width = LVSCW_AUTOSIZE_USEHEADER;
+					}
+					else
+					{
+						largest_width = 26;	// 5 + 16 + 5.
+
+						wchar_t tbuf[ 11 ];
+
+						LVITEM lvi;
+						_memzero( &lvi, sizeof( LVITEM ) );
+
+						int index = ( int )_SendMessageW( hWnd, LVM_GETTOPINDEX, 0, 0 );
+						int index_end = ( int )_SendMessageW( hWnd, LVM_GETCOUNTPERPAGE, 0, 0 ) + index;
+
+						RECT rc;
+						HDC hDC = _GetDC( hWnd );
+						HFONT ohf = ( HFONT )_SelectObject( hDC, hFont );
+						_DeleteObject( ohf );
+
+						for ( ; index <= index_end; ++index )
+						{
+							lvi.iItem = index;
+							lvi.mask = LVIF_PARAM;
+							if ( _SendMessageW( hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi ) == TRUE )
+							{
+								if ( lvi.lParam != NULL )
+								{
+									wchar_t *buf = GetListViewInfoString( column_info_type, ( void * )lvi.lParam, virtual_index, index + 1, tbuf, 11 );
+
+									if ( buf == NULL )
+									{
+										tbuf[ 0 ] = L'\0';
+										buf = tbuf;
+									}
+
+									rc.bottom = rc.left = rc.right = rc.top = 0;
+
+									_DrawTextW( hDC, buf, -1, &rc, DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT );
+
+									int width = ( rc.right - rc.left ) + 10;	// 5 + 5 padding.
+									if ( width > largest_width )
+									{
+										largest_width = width;
+									}
+								}
+							}
+							else
+							{
+								break;
+							}
+						}
+
+						_ReleaseDC( hWnd, hDC );
+					}
+
+					_SendMessageW( hWnd, LVM_SETCOLUMNWIDTH, nmh->iItem, largest_width );
+
+					// Save our new column width.
+					*columns_width[ virtual_index ] = ( int )_SendMessageW( hWnd, LVM_GETCOLUMNWIDTH, nmh->iItem, 0 );
+
+					return TRUE;
+				}
+				break;
+			}
+		}
+		break;
 	}
 
 	return _CallWindowProcW( ListsProc, hWnd, msg, wParam, lParam );
@@ -379,7 +664,7 @@ LRESULT CALLBACK TabListsSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 			if ( dis->CtlType == ODT_LISTVIEW && dis->itemData != NULL )
 			{
 				// Alternate item color's background.
-				if ( dis->itemID % 2 )	// Even rows will have a light grey background.
+				if ( dis->itemID & 1 )	// Even rows will have a light grey background.
 				{
 					HBRUSH color = _CreateSolidBrush( ( COLORREF )RGB( 0xF7, 0xF7, 0xF7 ) );
 					_FillRect( dis->hDC, &dis->rcItem, color );
@@ -390,10 +675,7 @@ LRESULT CALLBACK TabListsSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 				bool selected = false;
 				if ( dis->itemState & ( ODS_FOCUS || ODS_SELECTED ) )
 				{
-					if ( ( skip_log_draw && dis->hwndItem == g_hWnd_call_log ) ||
-						 ( skip_contact_draw && dis->hwndItem == g_hWnd_contact_list ) ||
-						 ( skip_ignore_draw && dis->hwndItem == g_hWnd_ignore_list ) ||
-						 ( skip_ignore_cid_draw && dis->hwndItem == g_hWnd_ignore_cid_list ) )
+					if ( skip_list_draw )
 					{
 						return TRUE;	// Don't draw selected items because their lParam values are being deleted.
 					}
@@ -406,7 +688,7 @@ LRESULT CALLBACK TabListsSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 
 				// Get the item's text.
 				wchar_t tbuf[ 11 ];
-				wchar_t *buf = tbuf;
+				wchar_t *buf = NULL;
 
 				// This is the full size of the row.
 				RECT last_rc;
@@ -417,50 +699,86 @@ LRESULT CALLBACK TabListsSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 				int arr[ 17 ];
 				int arr2[ 17 ];
 
+				unsigned char column_info_type;
+
 				int column_count = 0;
-				if ( dis->hwndItem == g_hWnd_call_log )
+				if ( dis->hwndItem == g_hWnd_allow_list )
 				{
-					_SendMessageW( dis->hwndItem, LVM_GETCOLUMNORDERARRAY, total_columns1, ( LPARAM )arr );
+					_SendMessageW( dis->hwndItem, LVM_GETCOLUMNORDERARRAY, g_total_columns1, ( LPARAM )arr );
 
 					_memcpy_s( arr2, sizeof( int ) * 17, arr, sizeof( int ) * NUM_COLUMNS1 );
 
 					// Offset the virtual indices to match the actual index.
-					OffsetVirtualIndices( arr2, call_log_columns, NUM_COLUMNS1, total_columns1 );
+					OffsetVirtualIndices( arr2, allow_list_columns, NUM_COLUMNS1, g_total_columns1 );
 
-					column_count = total_columns1;
+					column_count = g_total_columns1;
+
+					column_info_type = 0;
 				}
-				else if ( dis->hwndItem == g_hWnd_contact_list )
+				else if ( dis->hwndItem == g_hWnd_allow_cid_list )
 				{
-					_SendMessageW( dis->hwndItem, LVM_GETCOLUMNORDERARRAY, total_columns2, ( LPARAM )arr );
+					_SendMessageW( dis->hwndItem, LVM_GETCOLUMNORDERARRAY, g_total_columns2, ( LPARAM )arr );
 
 					_memcpy_s( arr2, sizeof( int ) * 17, arr, sizeof( int ) * NUM_COLUMNS2 );
 
 					// Offset the virtual indices to match the actual index.
-					OffsetVirtualIndices( arr2, contact_list_columns, NUM_COLUMNS2, total_columns2 );
+					OffsetVirtualIndices( arr2, allow_cid_list_columns, NUM_COLUMNS2, g_total_columns2 );
 
-					column_count = total_columns2;
+					column_count = g_total_columns2;
+
+					column_info_type = 1;
 				}
-				else if ( dis->hwndItem == g_hWnd_ignore_list )
+				else if ( dis->hwndItem == g_hWnd_call_log )
 				{
-					_SendMessageW( dis->hwndItem, LVM_GETCOLUMNORDERARRAY, total_columns3, ( LPARAM )arr );
+					_SendMessageW( dis->hwndItem, LVM_GETCOLUMNORDERARRAY, g_total_columns3, ( LPARAM )arr );
 
 					_memcpy_s( arr2, sizeof( int ) * 17, arr, sizeof( int ) * NUM_COLUMNS3 );
 
 					// Offset the virtual indices to match the actual index.
-					OffsetVirtualIndices( arr2, ignore_list_columns, NUM_COLUMNS3, total_columns3 );
+					OffsetVirtualIndices( arr2, call_log_columns, NUM_COLUMNS3, g_total_columns3 );
 
-					column_count = total_columns3;
+					column_count = g_total_columns3;
+
+					column_info_type = 2;
 				}
-				else if ( dis->hwndItem == g_hWnd_ignore_cid_list )
+				else if ( dis->hwndItem == g_hWnd_contact_list )
 				{
-					_SendMessageW( dis->hwndItem, LVM_GETCOLUMNORDERARRAY, total_columns4, ( LPARAM )arr );
+					_SendMessageW( dis->hwndItem, LVM_GETCOLUMNORDERARRAY, g_total_columns4, ( LPARAM )arr );
 
 					_memcpy_s( arr2, sizeof( int ) * 17, arr, sizeof( int ) * NUM_COLUMNS4 );
 
 					// Offset the virtual indices to match the actual index.
-					OffsetVirtualIndices( arr2, ignore_cid_list_columns, NUM_COLUMNS4, total_columns4 );
+					OffsetVirtualIndices( arr2, contact_list_columns, NUM_COLUMNS4, g_total_columns4 );
 
-					column_count = total_columns4;
+					column_count = g_total_columns4;
+
+					column_info_type = 3;
+				}
+				else if ( dis->hwndItem == g_hWnd_ignore_list )
+				{
+					_SendMessageW( dis->hwndItem, LVM_GETCOLUMNORDERARRAY, g_total_columns5, ( LPARAM )arr );
+
+					_memcpy_s( arr2, sizeof( int ) * 17, arr, sizeof( int ) * NUM_COLUMNS5 );
+
+					// Offset the virtual indices to match the actual index.
+					OffsetVirtualIndices( arr2, ignore_list_columns, NUM_COLUMNS5, g_total_columns5 );
+
+					column_count = g_total_columns5;
+
+					column_info_type = 4;
+				}
+				else if ( dis->hwndItem == g_hWnd_ignore_cid_list )
+				{
+					_SendMessageW( dis->hwndItem, LVM_GETCOLUMNORDERARRAY, g_total_columns6, ( LPARAM )arr );
+
+					_memcpy_s( arr2, sizeof( int ) * 17, arr, sizeof( int ) * NUM_COLUMNS6 );
+
+					// Offset the virtual indices to match the actual index.
+					OffsetVirtualIndices( arr2, ignore_cid_list_columns, NUM_COLUMNS6, g_total_columns6 );
+
+					column_count = g_total_columns6;
+
+					column_info_type = 5;
 				}
 
 				LVCOLUMN lvc;
@@ -470,90 +788,8 @@ LRESULT CALLBACK TabListsSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 				// Loop through all the columns
 				for ( int i = 0; i < column_count; ++i )
 				{
-					if ( dis->hwndItem == g_hWnd_call_log )
-					{
-						// Save the appropriate text in our buffer for the current column.
-						switch ( arr2[ i ] )
-						{
-							case 0:
-							{
-								buf = tbuf;	// Reset the buffer pointer.
-
-								__snwprintf( buf, 11, L"%lu", dis->itemID + 1 );
-							}
-							break;
-							case 1:
-							case 2:
-							case 3:
-							case 4:
-							case 5: { buf = ( ( displayinfo * )dis->itemData )->display_values[ arr2[ i ] - 1 ]; } break;
-						}
-					}
-					else if ( dis->hwndItem == g_hWnd_contact_list )
-					{
-						switch ( arr2[ i ] )
-						{
-							case 0:
-							{
-								buf = tbuf;	// Reset the buffer pointer.
-
-								__snwprintf( buf, 11, L"%lu", dis->itemID + 1 );
-							}
-							break;
-							case 1:
-							case 2:
-							case 3:
-							case 4:
-							case 5:
-							case 6:
-							case 7:
-							case 8:
-							case 9:
-							case 10:
-							case 11:
-							case 12:
-							case 13:
-							case 14:
-							case 15:
-							case 16:
-							{
-								buf = ( ( contactinfo * )dis->itemData )->contactinfo_values[ arr2[ i ] - 1 ];
-							}
-							break;
-						}
-					}
-					else if ( dis->hwndItem == g_hWnd_ignore_list )
-					{
-						switch ( arr2[ i ] )
-						{
-							case 0:
-							{
-								buf = tbuf;	// Reset the buffer pointer.
-
-								__snwprintf( buf, 11, L"%lu", dis->itemID + 1 );
-							}
-							break;
-							case 1:
-							case 2: { buf = ( ( ignoreinfo * )dis->itemData )->ignoreinfo_values[ arr2[ i ] - 1 ]; } break;
-						}
-					}
-					else if ( dis->hwndItem == g_hWnd_ignore_cid_list )
-					{
-						switch ( arr2[ i ] )
-						{
-							case 0:
-							{
-								buf = tbuf;	// Reset the buffer pointer.
-
-								__snwprintf( buf, 11, L"%lu", dis->itemID + 1 );
-							}
-							break;
-							case 1:
-							case 2:
-							case 3:
-							case 4: { buf = ( ( ignorecidinfo * )dis->itemData )->ignorecidinfo_values[ arr2[ i ] - 1 ]; } break;
-						}
-					}
+					// Save the appropriate text in our buffer for the current column.
+					buf = GetListViewInfoString( column_info_type, ( void * )dis->itemData, arr2[ i ], dis->itemID + 1, tbuf, 11 );
 
 					if ( buf == NULL )
 					{
@@ -610,7 +846,7 @@ LRESULT CALLBACK TabListsSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 						_DeleteObject( color );
 
 						// White text.
-						_SetTextColor( hdcMem, RGB( 0xFF, 0xFF, 0xFF ) );
+						_SetTextColor( hdcMem, _GetSysColor( COLOR_WINDOW ) );
 						_DrawTextW( hdcMem, buf, -1, &rc, DT_NOPREFIX | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS );
 						_BitBlt( dis->hDC, dis->rcItem.left + last_rc.left, last_rc.top, width, height, hdcMem, 0, 0, SRCCOPY );
 					}
@@ -622,13 +858,13 @@ LRESULT CALLBACK TabListsSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 						_DeleteObject( color );
 
 						// Black text for normal entries and red for ignored.
-						if ( dis->hwndItem != g_hWnd_call_log )
+						if ( dis->hwndItem == g_hWnd_call_log && ( ( display_info * )dis->itemData )->ignored )
 						{
-							_SetTextColor( hdcMem, RGB( 0x00, 0x00, 0x00 ) );
+							_SetTextColor( hdcMem, RGB( 0xFF, 0x00, 0x00 ) );
 						}
 						else
 						{
-							_SetTextColor( hdcMem, ( ( displayinfo * )dis->itemData )->ci.ignored ? RGB( 0xFF, 0x00, 0x00 ) : RGB( 0x00, 0x00, 0x00 ) );
+							_SetTextColor( hdcMem, _GetSysColor( COLOR_WINDOWTEXT ) );
 						}
 						_DrawTextW( hdcMem, buf, -1, &rc, DT_NOPREFIX | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS );
 						_BitBlt( dis->hDC, dis->rcItem.left + last_rc.left, last_rc.top, width, height, hdcMem, 0, 0, SRCAND );
@@ -646,17 +882,1009 @@ LRESULT CALLBACK TabListsSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 	return _CallWindowProcW( TabListsProc, hWnd, msg, wParam, lParam );
 }
 
+void HandleCommand( HWND hWnd, WPARAM wParam, LPARAM lParam )
+{
+	switch ( LOWORD( wParam ) )
+	{
+		case MENU_CLOSE_TAB:
+		{
+			switch ( context_tab_index )
+			{
+				case 0: { _SendMessageW( hWnd, WM_COMMAND, MAKEWPARAM( MENU_VIEW_ALLOW_LISTS, 0 ), 0 ); } break;
+				case 1: { _SendMessageW( hWnd, WM_COMMAND, MAKEWPARAM( MENU_VIEW_CALL_LOG, 0 ), 0 ); } break;
+				case 2: { _SendMessageW( hWnd, WM_COMMAND, MAKEWPARAM( MENU_VIEW_CONTACT_LIST, 0 ), 0 ); } break;
+				case 3: { _SendMessageW( hWnd, WM_COMMAND, MAKEWPARAM( MENU_VIEW_IGNORE_LISTS, 0 ), 0 ); } break;
+			}
+		}
+		break;
+
+		case MENU_VIEW_ALLOW_LISTS:
+		case MENU_VIEW_CALL_LOG:
+		case MENU_VIEW_CONTACT_LIST:
+		case MENU_VIEW_IGNORE_LISTS:
+		{
+			char *tab_index = NULL;
+			HWND t_hWnd = NULL;
+
+			TCITEM ti;
+			_memzero( &ti, sizeof( TCITEM ) );
+			ti.mask = TCIF_PARAM | TCIF_TEXT;			// The tab will have text and an lParam value.
+
+			if ( LOWORD( wParam ) == MENU_VIEW_ALLOW_LISTS )
+			{
+				tab_index = &cfg_tab_order1;
+				t_hWnd = g_hWnd_allow_tab;
+				ti.pszText = ( LPWSTR )ST_Allow_Lists;		// This will simply set the width of each tab item. We're not going to use it.
+			}
+			else if ( LOWORD( wParam ) == MENU_VIEW_CALL_LOG )
+			{
+				tab_index = &cfg_tab_order2;
+				t_hWnd = g_hWnd_call_log;
+				ti.pszText = ( LPWSTR )ST_Call_Log;		// This will simply set the width of each tab item. We're not going to use it.
+			}
+			else if ( LOWORD( wParam ) == MENU_VIEW_CONTACT_LIST )
+			{
+				tab_index = &cfg_tab_order3;
+				t_hWnd = g_hWnd_contact_list;
+				ti.pszText = ( LPWSTR )ST_Contact_List;		// This will simply set the width of each tab item. We're not going to use it.
+			}
+			else if ( LOWORD( wParam ) == MENU_VIEW_IGNORE_LISTS )
+			{
+				tab_index = &cfg_tab_order4;
+				t_hWnd = g_hWnd_ignore_tab;
+				ti.pszText = ( LPWSTR )ST_Ignore_Lists;		// This will simply set the width of each tab item. We're not going to use it.
+			}
+
+			if ( *tab_index != -1 )	// Remove the tab.
+			{
+				// Go through all the tabs and decrease the order values that are greater than the index we removed.
+				for ( unsigned char i = 0; i < NUM_TABS; ++i )
+				{
+					if ( *tab_order[ i ] != -1 && *tab_order[ i ] > *tab_index )
+					{
+						( *( tab_order[ i ] ) )--;
+					}
+				}
+
+				*tab_index = -1;
+
+				for ( int i = 0; i < g_total_tabs; ++i )
+				{
+					_SendMessageW( g_hWnd_tab, TCM_GETITEM, i, ( LPARAM )&ti );
+
+					if ( ( HWND )ti.lParam == t_hWnd )
+					{
+						int index = ( int )_SendMessageW( g_hWnd_tab, TCM_GETCURSEL, 0, 0 );		// Get the selected tab
+
+						// If the tab we remove is the last tab and it is focused, then set focus to the tab on the left.
+						// If the tab we remove is focused and there is a tab to the right, then set focus to the tab on the right.
+						if ( g_total_tabs > 1 && i == index )
+						{
+							_SendMessageW( g_hWnd_tab, TCM_SETCURFOCUS, ( i < g_total_tabs - 1 ? i + 1 : i - 1 ), 0 );	// Give the new tab focus.
+						}
+
+						_SendMessageW( g_hWnd_tab, TCM_DELETEITEM, i, 0 );
+						--g_total_tabs;
+
+						// Hide the tab control if no more tabs are visible.
+						if ( g_total_tabs == 0 )
+						{
+							_ShowWindow( ( HWND )ti.lParam, SW_HIDE );
+							_ShowWindow( g_hWnd_tab, SW_HIDE );
+						}
+					}
+				}
+			}
+			else	// Add the tab.
+			{
+				*tab_index = g_total_tabs;	// The new tab will be added to the end.
+
+				ti.lParam = ( LPARAM )t_hWnd;
+				_SendMessageW( g_hWnd_tab, TCM_INSERTITEM, g_total_tabs, ( LPARAM )&ti );	// Insert a new tab at the end.
+
+				// If no tabs were previously visible, then show the tab control.
+				if ( g_total_tabs == 0 )
+				{
+					_ShowWindow( g_hWnd_tab, SW_SHOW );
+					_ShowWindow( t_hWnd, SW_SHOW );
+
+					_SendMessageW( hWnd, WM_SIZE, 0, 0 );	// Forces the window to resize the listview.
+				}
+
+				++g_total_tabs;
+			}
+
+			_CheckMenuItem( g_hMenu, LOWORD( wParam ), ( *tab_index != -1 ? MF_CHECKED : MF_UNCHECKED ) );
+		}
+		break;
+
+		case MENU_COPY_SEL:
+		case MENU_COPY_SEL_COL1:
+		case MENU_COPY_SEL_COL2:
+		case MENU_COPY_SEL_COL3:
+		case MENU_COPY_SEL_COL4:
+		case MENU_COPY_SEL_COL5:
+		case MENU_COPY_SEL_COL6:
+		case MENU_COPY_SEL_COL7:
+		case MENU_COPY_SEL_COL21:
+		case MENU_COPY_SEL_COL22:
+		case MENU_COPY_SEL_COL23:
+		case MENU_COPY_SEL_COL24:
+		case MENU_COPY_SEL_COL25:
+		case MENU_COPY_SEL_COL26:
+		case MENU_COPY_SEL_COL27:
+		case MENU_COPY_SEL_COL28:
+		case MENU_COPY_SEL_COL29:
+		case MENU_COPY_SEL_COL210:
+		case MENU_COPY_SEL_COL211:
+		case MENU_COPY_SEL_COL212:
+		case MENU_COPY_SEL_COL213:
+		case MENU_COPY_SEL_COL214:
+		case MENU_COPY_SEL_COL215:
+		case MENU_COPY_SEL_COL216:
+		case MENU_COPY_SEL_COL31:
+		case MENU_COPY_SEL_COL32:
+		case MENU_COPY_SEL_COL33:
+		case MENU_COPY_SEL_COL41:
+		case MENU_COPY_SEL_COL42:
+		case MENU_COPY_SEL_COL43:
+		case MENU_COPY_SEL_COL44:
+		case MENU_COPY_SEL_COL45:
+		case MENU_COPY_SEL_COL46:
+		{
+			HWND c_hWnd = GetCurrentListView();
+			if ( c_hWnd != NULL )
+			{
+				copyinfo *ci = ( copyinfo * )GlobalAlloc( GMEM_FIXED, sizeof( copyinfo ) );
+				ci->column = LOWORD( wParam );
+				ci->hWnd = c_hWnd;
+
+				// ci is freed in the copy_items thread.
+				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, copy_items, ( void * )ci, 0, NULL );
+				if ( thread != NULL )
+				{
+					CloseHandle( thread );
+				}
+				else
+				{
+					GlobalFree( ci );
+				}
+			}
+		}
+		break;
+
+		case MENU_REMOVE_SEL:
+		{
+			HWND c_hWnd = GetCurrentListView();
+			if ( c_hWnd != NULL )
+			{
+				if ( c_hWnd == g_hWnd_call_log )
+				{
+					if ( _MessageBoxW( hWnd, ST_PROMPT_remove_entries, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONQUESTION | MB_YESNO ) == IDYES )
+					{
+						removeinfo *ri = ( removeinfo * )GlobalAlloc( GMEM_FIXED, sizeof( removeinfo ) );
+						ri->is_thread = true;
+						ri->hWnd = c_hWnd;
+
+						// ri is freed in the remove_items thread.
+						HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, remove_items, ( void * )ri, 0, NULL );
+						if ( thread != NULL )
+						{
+							CloseHandle( thread );
+						}
+						else
+						{
+							GlobalFree( ri );
+						}
+					}
+				}
+				else
+				{
+					// Remove the first selected (not the focused & selected).
+					LVITEM lvi;
+					_memzero( &lvi, sizeof( LVITEM ) );
+					lvi.mask = LVIF_PARAM;
+					lvi.iItem = ( int )_SendMessageW( c_hWnd, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
+
+					if ( lvi.iItem != -1 )
+					{
+						if ( c_hWnd == g_hWnd_contact_list )
+						{
+							if ( _MessageBoxW( hWnd, ST_PROMPT_remove_entries_contact_list, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONQUESTION | MB_YESNO ) == IDYES )
+							{
+								contact_update_info *cui = ( contact_update_info * )GlobalAlloc( GPTR, sizeof( contact_update_info ) );
+								cui->action = 1;	// 1 = Remove, 0 = Add
+
+								// cui is freed in the update_contact_list thread.
+								HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_contact_list, ( void * )cui, 0, NULL );
+								if ( thread != NULL )
+								{
+									CloseHandle( thread );
+								}
+								else
+								{
+									GlobalFree( cui );
+								}
+							}
+						}
+						else if ( c_hWnd == g_hWnd_allow_list || c_hWnd == g_hWnd_ignore_list )
+						{
+							if ( _MessageBoxW( hWnd, ST_PROMPT_remove_entries, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONQUESTION | MB_YESNO ) == IDYES )
+							{
+								allow_ignore_update_info *aiui = ( allow_ignore_update_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_update_info ) );
+								aiui->action = 1;	// 1 = Remove, 0 = Add
+								aiui->list_type = ( c_hWnd == g_hWnd_allow_list ? LIST_TYPE_ALLOW : LIST_TYPE_IGNORE );
+								aiui->hWnd = c_hWnd;
+
+								// aiui is freed in the update_allow_ignore_list thread.
+								HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_list, ( void * )aiui, 0, NULL );
+								if ( thread != NULL )
+								{
+									CloseHandle( thread );
+								}
+								else
+								{
+									GlobalFree( aiui );
+								}
+							}
+						}
+						else if ( c_hWnd == g_hWnd_allow_cid_list || c_hWnd == g_hWnd_ignore_cid_list )
+						{
+							if ( _MessageBoxW( hWnd, ST_PROMPT_remove_entries, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONQUESTION | MB_YESNO ) == IDYES )
+							{
+								allow_ignore_cid_update_info *aicidui = ( allow_ignore_cid_update_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_cid_update_info ) );
+								aicidui->action = 1;	// 1 = Remove, 0 = Add
+								aicidui->list_type = ( c_hWnd == g_hWnd_allow_cid_list ? LIST_TYPE_ALLOW : LIST_TYPE_IGNORE );
+								aicidui->hWnd = c_hWnd;
+
+								// aicidui is freed in the update_allow_ignore_cid_list thread.
+								HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_cid_list, ( void * )aicidui, 0, NULL );
+								if ( thread != NULL )
+								{
+									CloseHandle( thread );
+								}
+								else
+								{
+									GlobalFree( aicidui );
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		break;
+
+		case MENU_SELECT_ALL:
+		{
+			HWND c_hWnd = GetCurrentListView();
+			if ( c_hWnd != NULL )
+			{
+				// Set the state of all items to selected.
+				LVITEM lvi;
+				_memzero( &lvi, sizeof( LVITEM ) );
+				lvi.mask = LVIF_STATE;
+				lvi.state = LVIS_SELECTED;
+				lvi.stateMask = LVIS_SELECTED;
+				_SendMessageW( c_hWnd, LVM_SETITEMSTATE, -1, ( LPARAM )&lvi );
+
+				UpdateMenus( UM_ENABLE );
+			}
+		}
+		break;
+
+		case MENU_OPEN_WEB_PAGE:
+		{
+			LVITEM lvi;
+			_memzero( &lvi, sizeof( LVITEM ) );
+			lvi.mask = LVIF_PARAM;
+			lvi.iItem = ( int )_SendMessageW( g_hWnd_contact_list, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
+
+			if ( lvi.iItem != -1 )
+			{
+				_SendMessageW( g_hWnd_contact_list, LVM_GETITEM, 0, ( LPARAM )&lvi );
+
+				contact_info *ci = ( contact_info * )lvi.lParam;
+				if ( ci != NULL && ci->w_web_page != NULL )
+				{
+					bool destroy = true;
+					#ifndef OLE32_USE_STATIC_LIB
+						if ( ole32_state == OLE32_STATE_SHUTDOWN )
+						{
+							destroy = InitializeOle32();
+						}
+					#endif
+
+					if ( destroy )
+					{
+						_CoInitializeEx( NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE );
+					}
+
+					_ShellExecuteW( NULL, L"open", ci->w_web_page, NULL, NULL, SW_SHOWNORMAL );
+
+					if ( destroy )
+					{
+						_CoUninitialize();
+					}
+				}
+			}
+		}
+		break;
+
+		case MENU_SEARCH_WITH_1:
+		case MENU_SEARCH_WITH_2:
+		case MENU_SEARCH_WITH_3:
+		case MENU_SEARCH_WITH_4:
+		case MENU_SEARCH_WITH_5:
+		case MENU_SEARCH_WITH_6:
+		case MENU_SEARCH_WITH_7:
+		case MENU_SEARCH_WITH_8:
+		case MENU_SEARCH_WITH_9:
+		case MENU_SEARCH_WITH_10:
+		{
+			MENUITEMINFO mii;
+			_memzero( &mii, sizeof( MENUITEMINFO ) );
+			mii.cbSize = sizeof( MENUITEMINFO );
+			mii.fMask = MIIM_DATA;
+			_GetMenuItemInfoW( g_hMenu, MENU_SEARCH_WITH, FALSE, &mii );
+
+			unsigned short column = ( unsigned short )mii.dwItemData;
+
+			wchar_t *phone_number = GetSelectedColumnPhoneNumber( GetCurrentListView(), column );
+			if ( phone_number != NULL && phone_number[ 0 ] == L'+' )
+			{
+				++phone_number;
+			}
+
+			wchar_t *url = ( wchar_t * )GlobalAlloc( GPTR, sizeof( wchar_t ) * 128 );
+
+			switch ( LOWORD( wParam ) )
+			{
+				case MENU_SEARCH_WITH_1: { __snwprintf( url, 128, L"https://800notes.com/Phone.aspx/%s", SAFESTRW( phone_number ) ); } break;
+				case MENU_SEARCH_WITH_2: { __snwprintf( url, 128, L"https://www.bing.com/search?q=%s", SAFESTRW( phone_number ) ); } break;
+				case MENU_SEARCH_WITH_3: { __snwprintf( url, 128, L"https://callerr.com/%s", SAFESTRW( phone_number ) ); } break;
+				case MENU_SEARCH_WITH_4: { __snwprintf( url, 128, L"https://www.google.com/search?&q=%s", SAFESTRW( phone_number ) ); } break;
+				case MENU_SEARCH_WITH_5: { __snwprintf( url, 128, L"https://www.nomorobo.com/lookup/%s", SAFESTRW( phone_number ) ); } break;
+				case MENU_SEARCH_WITH_6: { __snwprintf( url, 128, L"https://www.okcaller.com/detail.php?number=%s", SAFESTRW( phone_number ) ); } break;
+				case MENU_SEARCH_WITH_7: { __snwprintf( url, 128, L"https://www.phonetray.com/lookup/Number/%s", SAFESTRW( phone_number ) ); } break;
+				case MENU_SEARCH_WITH_8: { __snwprintf( url, 128, L"https://www.whitepages.com/phone/%s", SAFESTRW( phone_number ) ); } break;
+				case MENU_SEARCH_WITH_9: { __snwprintf( url, 128, L"https://whocallsme.com/Phone-Number.aspx/%s", SAFESTRW( phone_number ) ); } break;
+				case MENU_SEARCH_WITH_10: { __snwprintf( url, 128, L"https://www.whycall.me/%s.html", SAFESTRW( phone_number ) ); } break;
+			}
+
+			bool destroy = true;
+			#ifndef OLE32_USE_STATIC_LIB
+				if ( ole32_state == OLE32_STATE_SHUTDOWN )
+				{
+					destroy = InitializeOle32();
+				}
+			#endif
+
+			if ( destroy )
+			{
+				_CoInitializeEx( NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE );
+			}
+
+			_ShellExecuteW( NULL, L"open", url, NULL, NULL, SW_SHOWNORMAL );
+
+			if ( destroy )
+			{
+				_CoUninitialize();
+			}
+
+			GlobalFree( url );
+		}
+		break;
+
+		case MENU_OPEN_EMAIL_ADDRESS:
+		{
+			LVITEM lvi;
+			_memzero( &lvi, sizeof( LVITEM ) );
+			lvi.mask = LVIF_PARAM;
+			lvi.iItem = ( int )_SendMessageW( g_hWnd_contact_list, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
+
+			if ( lvi.iItem != -1 )
+			{
+				_SendMessageW( g_hWnd_contact_list, LVM_GETITEM, 0, ( LPARAM )&lvi );
+
+				contact_info *ci = ( contact_info * )lvi.lParam;
+				if ( ci != NULL && ci->w_email_address != NULL )
+				{
+					int email_address_length = lstrlenW( ci->w_email_address );
+					wchar_t *mailto = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * ( email_address_length + 8 ) );
+					_wmemcpy_s( mailto, email_address_length + 8, L"mailto:", 7 );
+					_wmemcpy_s( mailto + 7, email_address_length + 1, ci->w_email_address, email_address_length );
+					mailto[ email_address_length + 7 ] = 0;	// Sanity.
+
+					bool destroy = true;
+					#ifndef OLE32_USE_STATIC_LIB
+						if ( ole32_state == OLE32_STATE_SHUTDOWN )
+						{
+							destroy = InitializeOle32();
+						}
+					#endif
+
+					if ( destroy )
+					{
+						_CoInitializeEx( NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE );
+					}
+
+					_ShellExecuteW( NULL, L"open", mailto, NULL, NULL, SW_SHOWNORMAL );
+
+					if ( destroy )
+					{
+						_CoUninitialize();
+					}
+
+					GlobalFree( mailto );
+				}
+			}
+		}
+		break;
+
+		case MENU_INCOMING_IGNORE:
+		{
+			LVITEM lvi;
+			_memzero( &lvi, sizeof( LVITEM ) );
+			lvi.mask = LVIF_PARAM;
+			lvi.iItem = ( int )_SendMessageW( g_hWnd_call_log, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
+
+			if ( lvi.iItem != -1 )
+			{
+				_SendMessageW( g_hWnd_call_log, LVM_GETITEM, 0, ( LPARAM )&lvi );
+
+				display_info *di = ( display_info * )lvi.lParam;
+
+				di->process_incoming = false;
+				di->ignored = true;
+
+				_InvalidateRect( g_hWnd_call_log, NULL, TRUE );
+
+				IgnoreIncomingCall( di->incoming_call );
+			}
+		}
+		break;
+
+		case MENU_ADD_ALLOW_IGNORE_LIST:
+		case MENU_EDIT_ALLOW_IGNORE_LIST:	// ignore list listview right click.
+		{
+			if ( g_hWnd_ignore_phone_number == NULL )
+			{
+				// Allow wildcard input. (Last parameter of CreateWindow is 1)
+				g_hWnd_ignore_phone_number = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"phone", ST_Ignore_Phone_Number, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 205 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 258 ) / 2 ), 205, 258, NULL, NULL, NULL, ( LPVOID )1 );
+			}
+
+			HWND c_hWnd = GetCurrentListView();
+
+			unsigned char add_ignore_type = ( c_hWnd == g_hWnd_allow_list ? 0x04 : 0x00 );
+
+			if ( LOWORD( wParam ) == MENU_ADD_ALLOW_IGNORE_LIST )
+			{
+				_SendMessageW( g_hWnd_ignore_phone_number, WM_PROPAGATE, 0x01 | add_ignore_type, 0 );
+
+				_SetForegroundWindow( g_hWnd_ignore_phone_number );
+			}
+			else// if ( LOWORD( wParam ) == MENU_EDIT_ALLOW_IGNORE_LIST )
+			{
+				LVITEM lvi;
+				_memzero( &lvi, sizeof( LVITEM ) );
+				lvi.mask = LVIF_PARAM;
+				lvi.iItem = ( int )_SendMessageW( c_hWnd, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
+
+				if ( lvi.iItem != -1 )
+				{
+					_SendMessageW( c_hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi );
+					_SendMessageW( g_hWnd_ignore_phone_number, WM_PROPAGATE, 0x02 | add_ignore_type, lvi.lParam );
+
+					_SetForegroundWindow( g_hWnd_ignore_phone_number );
+				}
+			}
+		}
+		break;
+
+		case MENU_ADD_ALLOW_IGNORE_CID_LIST:
+		case MENU_EDIT_ALLOW_IGNORE_CID_LIST:	// ignore cid list listview right click.
+		{
+			if ( g_hWnd_ignore_cid == NULL )
+			{
+				g_hWnd_ignore_cid = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"cid", ST_Ignore_Caller_ID_Name, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 205 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 193 ) / 2 ), 205, 193, NULL, NULL, NULL, ( LPVOID )0 );
+			}
+
+			HWND c_hWnd = GetCurrentListView();
+
+			unsigned char add_ignore_type = ( c_hWnd == g_hWnd_allow_cid_list ? 0x04 : 0x00 );
+
+			if ( LOWORD( wParam ) == MENU_ADD_ALLOW_IGNORE_CID_LIST )
+			{
+				_SendMessageW( g_hWnd_ignore_cid, WM_PROPAGATE, 0x01 | add_ignore_type, 0 );
+
+				_SetForegroundWindow( g_hWnd_ignore_cid );
+			}
+			else// if ( LOWORD( wParam ) == MENU_EDIT_ALLOW_IGNORE_CID_LIST )
+			{
+				LVITEM lvi;
+				_memzero( &lvi, sizeof( LVITEM ) );
+				lvi.mask = LVIF_PARAM;
+				lvi.iItem = ( int )_SendMessageW( c_hWnd, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
+
+				if ( lvi.iItem != -1 )
+				{
+					_SendMessageW( c_hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi );
+					_SendMessageW( g_hWnd_ignore_cid, WM_PROPAGATE, 0x02 | add_ignore_type, lvi.lParam );
+
+					_SetForegroundWindow( g_hWnd_ignore_cid );
+				}
+			}
+		}
+		break;
+
+		case MENU_ALLOW_LIST:
+		case MENU_IGNORE_LIST:
+		case MENU_ALLOW_CID_LIST:
+		case MENU_IGNORE_CID_LIST:	// call log listview right click.
+		{
+			// Retrieve the lParam value from the selected listview item.
+			LVITEM lvi;
+			_memzero( &lvi, sizeof( LVITEM ) );
+			lvi.mask = LVIF_PARAM;
+			lvi.iItem = ( int )_SendMessageW( g_hWnd_call_log, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
+
+			if ( lvi.iItem != -1 )
+			{
+				_SendMessageW( g_hWnd_call_log, LVM_GETITEM, 0, ( LPARAM )&lvi );
+
+				if ( lvi.lParam != NULL )
+				{
+					bool has_match;
+
+					if ( LOWORD( wParam ) == MENU_ALLOW_LIST || LOWORD( wParam ) == MENU_IGNORE_LIST )
+					{
+						has_match = ( LOWORD( wParam ) == MENU_ALLOW_LIST ? ( ( display_info * )lvi.lParam )->allow_phone_number :
+																			( ( display_info * )lvi.lParam )->ignore_phone_number );
+
+						if ( has_match )
+						{
+							if ( _MessageBoxW( hWnd, ( LOWORD( wParam ) == MENU_ALLOW_LIST ? ST_PROMPT_remove_entries_apn : ST_PROMPT_remove_entries_ipn ), PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONQUESTION | MB_YESNO ) == IDYES )
+							{
+								allow_ignore_update_info *aiui = ( allow_ignore_update_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_update_info ) );
+								aiui->action = 1;	// 1 = Remove, 0 = Add
+								aiui->list_type = ( LOWORD( wParam ) == MENU_ALLOW_LIST ? LIST_TYPE_ALLOW : LIST_TYPE_IGNORE );
+								aiui->hWnd = g_hWnd_call_log;
+
+								// aiui is freed in the update_allow_ignore_list thread.
+								HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_list, ( void * )aiui, 0, NULL );
+								if ( thread != NULL )
+								{
+									CloseHandle( thread );
+								}
+								else
+								{
+									GlobalFree( aiui );
+								}
+							}
+						}
+						else	// Add items to the allow/ignore list.
+						{
+							allow_ignore_update_info *aiui = ( allow_ignore_update_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_update_info ) );
+							aiui->action = 0;	// 1 = Remove, 0 = Add
+							aiui->list_type = ( LOWORD( wParam ) == MENU_ALLOW_LIST ? LIST_TYPE_ALLOW : LIST_TYPE_IGNORE );
+							aiui->hWnd = g_hWnd_call_log;
+
+							// aiui is freed in the update_allow_ignore_list thread.
+							HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_list, ( void * )aiui, 0, NULL );
+							if ( thread != NULL )
+							{
+								CloseHandle( thread );
+							}
+							else
+							{
+								GlobalFree( aiui );
+							}
+						}
+					}
+					else if ( LOWORD( wParam ) == MENU_ALLOW_CID_LIST || LOWORD( wParam ) == MENU_IGNORE_CID_LIST )
+					{
+						if ( LOWORD( wParam ) == MENU_ALLOW_CID_LIST )
+						{
+							has_match = ( ( ( display_info * )lvi.lParam )->allow_cid_match_count > 0 ? true : false );
+						}
+						else
+						{
+							has_match = ( ( ( display_info * )lvi.lParam )->ignore_cid_match_count > 0 ? true : false );
+						}
+
+						if ( has_match )
+						{
+							int mb_ret;
+
+							if ( LOWORD( wParam ) == MENU_ALLOW_CID_LIST )
+							{
+								mb_ret = _MessageBoxW( hWnd, ST_PROMPT_remove_entries_acid, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONQUESTION | MB_YESNO );
+							}
+							else
+							{
+								mb_ret = _MessageBoxW( hWnd, ST_PROMPT_remove_entries_icid, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONQUESTION | MB_YESNO );
+							}
+
+							if ( mb_ret == IDYES )
+							{
+								allow_ignore_cid_update_info *aicidui = ( allow_ignore_cid_update_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_cid_update_info ) );
+								aicidui->action = 1;	// 1 = Remove, 0 = Add
+								aicidui->list_type = ( LOWORD( wParam ) == MENU_ALLOW_CID_LIST ? LIST_TYPE_ALLOW : LIST_TYPE_IGNORE );
+								aicidui->hWnd = g_hWnd_call_log;
+
+								// Remove items.
+								HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_cid_list, ( void * )aicidui, 0, NULL );
+								if ( thread != NULL )
+								{
+									CloseHandle( thread );
+								}
+								else
+								{
+									GlobalFree( aicidui );
+								}
+							}
+						}
+						else	// The item we've selected is not in the allow/ignorecidlist tree. Prompt the user.
+						{
+							if ( g_hWnd_ignore_cid == NULL )
+							{
+								g_hWnd_ignore_cid = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"cid", ST_Ignore_Caller_ID_Name, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 205 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 193 ) / 2 ), 205, 193, NULL, NULL, NULL, ( LPVOID )0 );
+							}
+
+							_SendMessageW( g_hWnd_ignore_cid, WM_PROPAGATE, 0x01 | ( LOWORD( wParam ) == MENU_ALLOW_CID_LIST ? 0x04 : 0x00 ) | ( _SendMessageW( g_hWnd_call_log, LVM_GETSELECTEDCOUNT, 0, 0 ) > 1 ? 0x08 : 0x00 ), lvi.lParam );
+
+							_SetForegroundWindow( g_hWnd_ignore_cid );
+						}
+					}
+				}
+			}
+		}
+		break;
+
+		case MENU_COLUMN_1:
+		case MENU_COLUMN_2:
+		case MENU_COLUMN_3:
+		case MENU_COLUMN_4:
+		case MENU_COLUMN_5:
+		case MENU_COLUMN_6:
+		case MENU_COLUMN_7:
+		case MENU_COLUMN_8:
+		case MENU_COLUMN_9:
+		case MENU_COLUMN_10:
+		case MENU_COLUMN_11:
+		case MENU_COLUMN_12:
+		case MENU_COLUMN_13:
+		case MENU_COLUMN_14:
+		case MENU_COLUMN_15:
+		case MENU_COLUMN_16:
+		case MENU_COLUMN_17:
+		{
+			HWND c_hWnd = GetCurrentListView();
+			if ( c_hWnd != NULL )
+			{
+				UpdateColumns( c_hWnd, LOWORD( wParam ) );
+			}
+		}
+		break;
+
+		case MENU_EDIT_CONTACT:
+		case MENU_ADD_CONTACT:
+		{
+			if ( g_hWnd_contact == NULL )
+			{
+				g_hWnd_contact = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"contact", ST_Contact_Information, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 550 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 344 ) / 2 ), 550, 344, NULL, NULL, NULL, NULL );
+			}
+
+			if ( LOWORD( wParam ) == MENU_EDIT_CONTACT )
+			{
+				LVITEM lvi;
+				_memzero( &lvi, sizeof( LVITEM ) );
+				lvi.mask = LVIF_PARAM;
+				lvi.iItem = ( int )_SendMessageW( g_hWnd_contact_list, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
+
+				if ( lvi.iItem != -1 )
+				{
+					_SendMessageW( g_hWnd_contact_list, LVM_GETITEM, 0, ( LPARAM )&lvi );
+
+					_SendMessageW( g_hWnd_contact, WM_PROPAGATE, MAKEWPARAM( CW_MODIFY, 0 ), lvi.lParam );	// Edit contact.
+				}
+			}
+			else
+			{
+				_SendMessageW( g_hWnd_contact, WM_PROPAGATE, MAKEWPARAM( CW_MODIFY, 0 ), 0 );	// Add contact.
+			}
+
+			_SetForegroundWindow( g_hWnd_contact );
+		}
+		break;
+
+		case MENU_MESSAGE_LOG:
+		{
+			if ( _IsWindowVisible( g_hWnd_message_log ) == TRUE )
+			{
+				_SetForegroundWindow( g_hWnd_message_log );
+			}
+			else
+			{
+				ShowWindow( g_hWnd_message_log, SW_SHOWNORMAL );
+			}
+		}
+		break;
+
+		case MENU_SAVE_CALL_LOG:
+		{
+			wchar_t *file_path = ( wchar_t * )GlobalAlloc( GPTR, sizeof( wchar_t ) * MAX_PATH );
+
+			OPENFILENAME ofn;
+			_memzero( &ofn, sizeof( OPENFILENAME ) );
+			ofn.lStructSize = sizeof( OPENFILENAME );
+			ofn.hwndOwner = hWnd;
+			ofn.lpstrFilter = L"CSV (Comma delimited) (*.csv)\0*.csv\0";
+			ofn.lpstrDefExt = L"csv";
+			ofn.lpstrTitle = ST_Save_Call_Log;
+			ofn.lpstrFile = file_path;
+			ofn.nMaxFile = MAX_PATH;
+			ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_READONLY;
+
+			if ( _GetSaveFileNameW( &ofn ) )
+			{
+				// file_path will be freed in the create_call_log_csv_file thread.
+				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, create_call_log_csv_file, ( void * )file_path, 0, NULL );
+				if ( thread != NULL )
+				{
+					CloseHandle( thread );
+				}
+				else
+				{
+					GlobalFree( file_path );
+				}
+			}
+			else
+			{
+				GlobalFree( file_path );
+			}
+		}
+		break;
+
+		case MENU_EXPORT_LIST:
+		{
+			wchar_t *file_name = ( wchar_t * )GlobalAlloc( GPTR, sizeof( wchar_t ) * MAX_PATH );
+
+			OPENFILENAME ofn;
+			_memzero( &ofn, sizeof( OPENFILENAME ) );
+			ofn.lStructSize = sizeof( OPENFILENAME );
+			ofn.hwndOwner = hWnd;
+			ofn.lpstrFilter = L"Allow Caller ID Name List\0*.*\0" \
+							  L"Allow Phone Number List\0*.*\0" \
+							  L"Call Log History\0*.*\0" \
+							  L"Contact List\0*.*\0" \
+							  L"Ignore Caller ID Name List\0*.*\0" \
+							  L"Ignore Phone Number List\0*.*\0";
+			//ofn.lpstrDefExt = L"txt";
+			ofn.lpstrTitle = ST_Export;
+			ofn.lpstrFile = file_name;
+			ofn.nMaxFile = MAX_PATH;
+			ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_READONLY;
+
+			HWND c_hWnd = GetCurrentListView();
+			if ( c_hWnd != NULL )
+			{
+				if		( c_hWnd == g_hWnd_allow_cid_list )		{ ofn.nFilterIndex = 1; }
+				else if ( c_hWnd == g_hWnd_allow_list )			{ ofn.nFilterIndex = 2; }
+				else if ( c_hWnd == g_hWnd_call_log )			{ ofn.nFilterIndex = 3; }
+				else if ( c_hWnd == g_hWnd_contact_list )		{ ofn.nFilterIndex = 4; }
+				else if ( c_hWnd == g_hWnd_ignore_cid_list )	{ ofn.nFilterIndex = 5; }
+				else if ( c_hWnd == g_hWnd_ignore_list )		{ ofn.nFilterIndex = 6; }
+			}
+
+			if ( _GetSaveFileNameW( &ofn ) )
+			{
+				importexportinfo *iei = ( importexportinfo * )GlobalAlloc( GMEM_FIXED, sizeof( importexportinfo ) );
+				iei->file_paths = file_name;
+				iei->file_type = ( unsigned char )( 6 - ofn.nFilterIndex );
+
+				// iei will be freed in the export_list thread.
+				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, export_list, ( void * )iei, 0, NULL );
+				if ( thread != NULL )
+				{
+					CloseHandle( thread );
+				}
+				else
+				{
+					GlobalFree( iei->file_paths );
+					GlobalFree( iei );
+				}
+			}
+			else
+			{
+				GlobalFree( file_name );
+			}
+		}
+		break;
+
+		case MENU_IMPORT_LIST:
+		{
+			wchar_t *file_name = ( wchar_t * )GlobalAlloc( GPTR, sizeof( wchar_t ) * ( MAX_PATH * MAX_PATH ) );
+
+			OPENFILENAME ofn;
+			_memzero( &ofn, sizeof( OPENFILENAME ) );
+			ofn.lStructSize = sizeof( OPENFILENAME );
+			ofn.hwndOwner = hWnd;
+			ofn.lpstrFilter = L"Allow Caller ID Name List\0*.*\0" \
+							  L"Allow Phone Number List\0*.*\0" \
+							  L"Call Log History\0*.*\0" \
+							  L"Contact List\0*.*\0" \
+							  L"Ignore Caller ID Name List\0*.*\0" \
+							  L"Ignore Phone Number List\0*.*\0";
+			ofn.lpstrTitle = ST_Import;
+			ofn.lpstrFile = file_name;
+			ofn.nMaxFile = MAX_PATH * MAX_PATH;
+			ofn.Flags = OFN_ALLOWMULTISELECT | OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_READONLY;
+
+			HWND c_hWnd = GetCurrentListView();
+			if ( c_hWnd != NULL )
+			{
+				if		( c_hWnd == g_hWnd_allow_cid_list )		{ ofn.nFilterIndex = 1; }
+				else if ( c_hWnd == g_hWnd_allow_list )			{ ofn.nFilterIndex = 2; }
+				else if ( c_hWnd == g_hWnd_call_log )			{ ofn.nFilterIndex = 3; }
+				else if ( c_hWnd == g_hWnd_contact_list )		{ ofn.nFilterIndex = 4; }
+				else if ( c_hWnd == g_hWnd_ignore_cid_list )	{ ofn.nFilterIndex = 5; }
+				else if ( c_hWnd == g_hWnd_ignore_list )		{ ofn.nFilterIndex = 6; }
+			}
+
+			if ( _GetOpenFileNameW( &ofn ) )
+			{
+				importexportinfo *iei = ( importexportinfo * )GlobalAlloc( GMEM_FIXED, sizeof( importexportinfo ) );
+				iei->file_paths = file_name;
+				iei->file_offset = ofn.nFileOffset;
+				iei->file_type = ( unsigned char )( 6 - ofn.nFilterIndex );
+
+				// iei will be freed in the import_list thread.
+				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, import_list, ( void * )iei, 0, NULL );
+				if ( thread != NULL )
+				{
+					CloseHandle( thread );
+				}
+				else
+				{
+					GlobalFree( iei->file_paths );
+					GlobalFree( iei );
+				}
+			}
+			else
+			{
+				GlobalFree( file_name );
+			}
+		}
+		break;
+
+		case MENU_SEARCH:
+		{
+			if ( g_hWnd_search == NULL )
+			{
+				g_hWnd_search = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"search", ST_Search, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 320 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 210 ) / 2 ), 320, 210, NULL, NULL, NULL, NULL );
+			}
+			_SendMessageW( g_hWnd_search, WM_PROPAGATE, 0, 0 );
+		}
+		break;
+
+		case MENU_OPTIONS:
+		{
+			if ( g_hWnd_options == NULL )
+			{
+				g_hWnd_options = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"options", ST_Options, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 470 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 395 ) / 2 ), 470, 395, NULL, NULL, NULL, NULL );
+				_ShowWindow( g_hWnd_options, SW_SHOWNORMAL );
+			}
+			_SetForegroundWindow( g_hWnd_options );
+		}
+		break;
+
+		case MENU_VZ_ENHANCED_HOME_PAGE:
+		{
+			bool destroy = true;
+			#ifndef OLE32_USE_STATIC_LIB
+				if ( ole32_state == OLE32_STATE_SHUTDOWN )
+				{
+					destroy = InitializeOle32();
+				}
+			#endif
+
+			if ( destroy )
+			{
+				_CoInitializeEx( NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE );
+			}
+
+			_ShellExecuteW( NULL, L"open", HOME_PAGE, NULL, NULL, SW_SHOWNORMAL );
+
+			if ( destroy )
+			{
+				_CoUninitialize();
+			}
+		}
+		break;
+
+		case MENU_CHECK_FOR_UPDATES:
+		{
+			update_check_state = 1;	// Manual update check.
+
+			if ( g_hWnd_update == NULL )
+			{
+				g_hWnd_update = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"update", ST_Checking_For_Updates___, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 510 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 240 ) / 2 ), 510, 240, NULL, NULL, NULL, NULL );
+
+				UPDATE_CHECK_INFO *update_info = ( UPDATE_CHECK_INFO * )GlobalAlloc( GPTR, sizeof( UPDATE_CHECK_INFO ) );
+				HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, CheckForUpdates, ( void * )update_info, 0, NULL );
+				if ( thread != NULL )
+				{
+					CloseHandle( thread );
+				}
+				else
+				{
+					GlobalFree( update_info );
+				}
+			}
+
+			_ShowWindow( g_hWnd_update, SW_SHOWNORMAL );
+			_SetForegroundWindow( g_hWnd_update );
+		}
+		break;
+
+		case MENU_ABOUT:
+		{
+			wchar_t msg[ 512 ];
+			__snwprintf( msg, 512, L"VZ Enhanced 56K is made free under the GPLv3 license.\r\n\r\n" \
+								   L"Version 1.0.0.6 (%u-bit)\r\n\r\n" \
+								   L"Built on %s, %s %d, %04d %d:%02d:%02d %s (UTC)\r\n\r\n" \
+								   L"Copyright \xA9 2013-2019 Eric Kutcher",
+#ifdef _WIN64
+								   64,
+#else
+								   32,
+#endif
+								   GetDay( g_compile_time.wDayOfWeek ),
+								   GetMonth( g_compile_time.wMonth ),
+								   g_compile_time.wDay,
+								   g_compile_time.wYear,
+								   ( g_compile_time.wHour > 12 ? g_compile_time.wHour - 12 : ( g_compile_time.wHour != 0 ? g_compile_time.wHour : 12 ) ),
+								   g_compile_time.wMinute,
+								   g_compile_time.wSecond,
+								   ( g_compile_time.wHour >= 12 ? L"PM" : L"AM" ) );
+
+			_MessageBoxW( hWnd, msg, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONINFORMATION );
+		}
+		break;
+
+		case MENU_RESTORE:
+		{
+			if ( _IsIconic( hWnd ) )	// If minimized, then restore the window.
+			{
+				_ShowWindow( hWnd, SW_RESTORE );
+			}
+			else if ( _IsWindowVisible( hWnd ) == TRUE )	// If already visible, then flash the window.
+			{
+				_FlashWindow( hWnd, TRUE );
+			}
+			else	// If hidden, then show the window.
+			{
+				_ShowWindow( hWnd, SW_SHOW );
+			}
+		}
+		break;
+
+		case MENU_EXIT:
+		{
+			_SendMessageW( hWnd, WM_EXIT, 0, 0 );
+		}
+		break;
+	}
+}
+
 LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 {
     switch ( msg )
     {
 		case WM_CREATE:
 		{
-			CreateMenus();
-
-			// Set our menu bar.
-			_SetMenu( hWnd, g_hMenu );
-
 			g_hWnd_tab = _CreateWindowW( WC_TABCONTROL, NULL, WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE, 0, 0, 0, 0, hWnd, NULL, NULL, NULL );
 
 			// Create our listview windows.
@@ -674,18 +1902,31 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 			g_hWnd_ignore_list = _CreateWindowW( WC_LISTVIEW, NULL, LVS_REPORT | LVS_OWNERDRAWFIXED | WS_CHILDWINDOW, 0, 0, 0, 0, g_hWnd_ignore_tab, NULL, NULL, NULL );
 			_SendMessageW( g_hWnd_ignore_list, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_DOUBLEBUFFER | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP );
 
+			g_hWnd_allow_tab = _CreateWindowW( WC_TABCONTROL, NULL, WS_CHILDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0, 0, 0, 0, g_hWnd_tab, NULL, NULL, NULL );
+
+			g_hWnd_allow_cid_list = _CreateWindowW( WC_LISTVIEW, NULL, LVS_REPORT | LVS_OWNERDRAWFIXED | WS_CHILDWINDOW | WS_VISIBLE, 0, 0, 0, 0, g_hWnd_allow_tab, NULL, NULL, NULL );
+			_SendMessageW( g_hWnd_allow_cid_list, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_DOUBLEBUFFER | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP );
+
+			g_hWnd_allow_list = _CreateWindowW( WC_LISTVIEW, NULL, LVS_REPORT | LVS_OWNERDRAWFIXED | WS_CHILDWINDOW, 0, 0, 0, 0, g_hWnd_allow_tab, NULL, NULL, NULL );
+			_SendMessageW( g_hWnd_allow_list, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_DOUBLEBUFFER | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP );
+
 			_SendMessageW( g_hWnd_tab, WM_SETFONT, ( WPARAM )hFont, 0 );
 			_SendMessageW( g_hWnd_call_log, WM_SETFONT, ( WPARAM )hFont, 0 );
 			_SendMessageW( g_hWnd_contact_list, WM_SETFONT, ( WPARAM )hFont, 0 );
 			_SendMessageW( g_hWnd_ignore_tab, WM_SETFONT, ( WPARAM )hFont, 0 );
 			_SendMessageW( g_hWnd_ignore_cid_list, WM_SETFONT, ( WPARAM )hFont, 0 );
 			_SendMessageW( g_hWnd_ignore_list, WM_SETFONT, ( WPARAM )hFont, 0 );
+			_SendMessageW( g_hWnd_allow_tab, WM_SETFONT, ( WPARAM )hFont, 0 );
+			_SendMessageW( g_hWnd_allow_cid_list, WM_SETFONT, ( WPARAM )hFont, 0 );
+			_SendMessageW( g_hWnd_allow_list, WM_SETFONT, ( WPARAM )hFont, 0 );
 
 			// Allow drag and drop for the listview.
 			_DragAcceptFiles( g_hWnd_call_log, TRUE );
 			_DragAcceptFiles( g_hWnd_contact_list, TRUE );
 			_DragAcceptFiles( g_hWnd_ignore_cid_list, TRUE );
 			_DragAcceptFiles( g_hWnd_ignore_list, TRUE );
+			_DragAcceptFiles( g_hWnd_allow_cid_list, TRUE );
+			_DragAcceptFiles( g_hWnd_allow_list, TRUE );
 
 			TCITEM ti;
 			_memzero( &ti, sizeof( TCITEM ) );
@@ -695,31 +1936,51 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 			ti.lParam = ( LPARAM )g_hWnd_ignore_cid_list;
 			_SendMessageW( g_hWnd_ignore_tab, TCM_INSERTITEM, 0, ( LPARAM )&ti );	// Insert a new tab at the end.
 
+			ti.lParam = ( LPARAM )g_hWnd_allow_cid_list;
+			_SendMessageW( g_hWnd_allow_tab, TCM_INSERTITEM, 0, ( LPARAM )&ti );	// Insert a new tab at the end.
+
 			ti.pszText = ( LPWSTR )ST_Phone_Numbers;	// This will simply set the width of each tab item. We're not going to use it.
 			ti.lParam = ( LPARAM )g_hWnd_ignore_list;
 			_SendMessageW( g_hWnd_ignore_tab, TCM_INSERTITEM, 1, ( LPARAM )&ti );	// Insert a new tab at the end.
 
+			ti.lParam = ( LPARAM )g_hWnd_allow_list;
+			_SendMessageW( g_hWnd_allow_tab, TCM_INSERTITEM, 1, ( LPARAM )&ti );	// Insert a new tab at the end.
+
 			// Handles drag and drop in the listviews.
-			ListsProc = ( WNDPROC )_GetWindowLongW( g_hWnd_call_log, GWL_WNDPROC );
-			_SetWindowLongW( g_hWnd_call_log, GWL_WNDPROC, ( LONG )ListsSubProc );
-			_SetWindowLongW( g_hWnd_contact_list, GWL_WNDPROC, ( LONG )ListsSubProc );
-			_SetWindowLongW( g_hWnd_ignore_cid_list, GWL_WNDPROC, ( LONG )ListsSubProc );
-			_SetWindowLongW( g_hWnd_ignore_list, GWL_WNDPROC, ( LONG )ListsSubProc );
+			ListsProc = ( WNDPROC )_GetWindowLongPtrW( g_hWnd_call_log, GWLP_WNDPROC );
+			_SetWindowLongPtrW( g_hWnd_call_log, GWLP_WNDPROC, ( LONG_PTR )ListsSubProc );
+			_SetWindowLongPtrW( g_hWnd_contact_list, GWLP_WNDPROC, ( LONG_PTR )ListsSubProc );
+			_SetWindowLongPtrW( g_hWnd_ignore_cid_list, GWLP_WNDPROC, ( LONG_PTR )ListsSubProc );
+			_SetWindowLongPtrW( g_hWnd_ignore_list, GWLP_WNDPROC, ( LONG_PTR )ListsSubProc );
+			_SetWindowLongPtrW( g_hWnd_allow_cid_list, GWLP_WNDPROC, ( LONG_PTR )ListsSubProc );
+			_SetWindowLongPtrW( g_hWnd_allow_list, GWLP_WNDPROC, ( LONG_PTR )ListsSubProc );
 
 			// Handles the drawing of the listviews in the tab controls.
-			TabListsProc = ( WNDPROC )_GetWindowLongW( g_hWnd_tab, GWL_WNDPROC );
-			_SetWindowLongW( g_hWnd_tab, GWL_WNDPROC, ( LONG )TabListsSubProc );
-			_SetWindowLongW( g_hWnd_ignore_tab, GWL_WNDPROC, ( LONG )TabListsSubProc );
+			TabListsProc = ( WNDPROC )_GetWindowLongPtrW( g_hWnd_tab, GWLP_WNDPROC );
+			_SetWindowLongPtrW( g_hWnd_tab, GWLP_WNDPROC, ( LONG_PTR )TabListsSubProc );
+			_SetWindowLongPtrW( g_hWnd_ignore_tab, GWLP_WNDPROC, ( LONG_PTR )TabListsSubProc );
+			_SetWindowLongPtrW( g_hWnd_allow_tab, GWLP_WNDPROC, ( LONG_PTR )TabListsSubProc );
 
 			// Handles the drawing of the main tab control.
-			TabProc = ( WNDPROC )_GetWindowLongW( g_hWnd_tab, GWL_WNDPROC );
-			_SetWindowLongW( g_hWnd_tab, GWL_WNDPROC, ( LONG )TabSubProc );
+			TabProc = ( WNDPROC )_GetWindowLongPtrW( g_hWnd_tab, GWLP_WNDPROC );
+			_SetWindowLongPtrW( g_hWnd_tab, GWLP_WNDPROC, ( LONG_PTR )TabSubProc );
 
 			_SendMessageW( g_hWnd_tab, WM_PROPAGATE, 1, 0 );	// Open theme data. Must be done after we subclass the control. Theme object will be closed when the tab control is destroyed.
 
-			for ( int i = 0; i < 4; ++i )
+			for ( unsigned char i = 0; i < NUM_TABS; ++i )
 			{
 				if ( i == cfg_tab_order1 )
+				{
+					if ( i == 0 )
+					{
+						_ShowWindow( g_hWnd_allow_tab, SW_SHOW );
+					}
+
+					ti.pszText = ( LPWSTR )ST_Allow_Lists;	// This will simply set the width of each tab item. We're not going to use it.
+					ti.lParam = ( LPARAM )g_hWnd_allow_tab;
+					_SendMessageW( g_hWnd_tab, TCM_INSERTITEM, g_total_tabs++, ( LPARAM )&ti );	// Insert a new tab at the end.
+				}
+				else if ( i == cfg_tab_order2 )
 				{
 					if ( i == 0 )
 					{
@@ -728,9 +1989,9 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 
 					ti.pszText = ( LPWSTR )ST_Call_Log;		// This will simply set the width of each tab item. We're not going to use it.
 					ti.lParam = ( LPARAM )g_hWnd_call_log;
-					_SendMessageW( g_hWnd_tab, TCM_INSERTITEM, total_tabs++, ( LPARAM )&ti );	// Insert a new tab at the end.
+					_SendMessageW( g_hWnd_tab, TCM_INSERTITEM, g_total_tabs++, ( LPARAM )&ti );	// Insert a new tab at the end.
 				}
-				else if ( i == cfg_tab_order2 )
+				else if ( i == cfg_tab_order3 )
 				{
 					if ( i == 0 )
 					{
@@ -739,9 +2000,9 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 
 					ti.pszText = ( LPWSTR )ST_Contact_List;	// This will simply set the width of each tab item. We're not going to use it.
 					ti.lParam = ( LPARAM )g_hWnd_contact_list;
-					_SendMessageW( g_hWnd_tab, TCM_INSERTITEM, total_tabs++, ( LPARAM )&ti );	// Insert a new tab at the end.
+					_SendMessageW( g_hWnd_tab, TCM_INSERTITEM, g_total_tabs++, ( LPARAM )&ti );	// Insert a new tab at the end.
 				}
-				else if ( i == cfg_tab_order3 )
+				else if ( i == cfg_tab_order4 )
 				{
 					if ( i == 0 )
 					{
@@ -750,11 +2011,11 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 
 					ti.pszText = ( LPWSTR )ST_Ignore_Lists;	// This will simply set the width of each tab item. We're not going to use it.
 					ti.lParam = ( LPARAM )g_hWnd_ignore_tab;
-					_SendMessageW( g_hWnd_tab, TCM_INSERTITEM, total_tabs++, ( LPARAM )&ti );	// Insert a new tab at the end.
+					_SendMessageW( g_hWnd_tab, TCM_INSERTITEM, g_total_tabs++, ( LPARAM )&ti );	// Insert a new tab at the end.
 				}
 			}
 
-			if ( total_tabs == 0 )
+			if ( g_total_tabs == 0 )
 			{
 				_ShowWindow( g_hWnd_tab, SW_HIDE );
 			}
@@ -768,59 +2029,87 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 
 			for ( char i = 0; i < NUM_COLUMNS1; ++i )
 			{
+				if ( *allow_list_columns[ i ] != -1 )
+				{
+					lvc.pszText = allow_ignore_list_string_table[ i ];
+					lvc.cx = *allow_list_columns_width[ i ];
+					_SendMessageW( g_hWnd_allow_list, LVM_INSERTCOLUMN, g_total_columns1, ( LPARAM )&lvc );
+
+					arr[ g_total_columns1++ ] = *allow_list_columns[ i ];
+				}
+			}
+
+			_SendMessageW( g_hWnd_allow_list, LVM_SETCOLUMNORDERARRAY, g_total_columns1, ( LPARAM )arr );
+
+			for ( char i = 0; i < NUM_COLUMNS2; ++i )
+			{
+				if ( *allow_cid_list_columns[ i ] != -1 )
+				{
+					lvc.pszText = allow_ignore_cid_list_string_table[ i ];
+					lvc.cx = *allow_cid_list_columns_width[ i ];
+					_SendMessageW( g_hWnd_allow_cid_list, LVM_INSERTCOLUMN, g_total_columns2, ( LPARAM )&lvc );
+
+					arr[ g_total_columns2++ ] = *allow_cid_list_columns[ i ];
+				}
+			}
+
+			_SendMessageW( g_hWnd_allow_cid_list, LVM_SETCOLUMNORDERARRAY, g_total_columns2, ( LPARAM )arr );
+
+			for ( char i = 0; i < NUM_COLUMNS3; ++i )
+			{
 				if ( *call_log_columns[ i ] != -1 )
 				{
 					lvc.pszText = call_log_string_table[ i ];
 					lvc.cx = *call_log_columns_width[ i ];
-					_SendMessageW( g_hWnd_call_log, LVM_INSERTCOLUMN, total_columns1, ( LPARAM )&lvc );
+					_SendMessageW( g_hWnd_call_log, LVM_INSERTCOLUMN, g_total_columns3, ( LPARAM )&lvc );
 
-					arr[ total_columns1++ ] = *call_log_columns[ i ];
+					arr[ g_total_columns3++ ] = *call_log_columns[ i ];
 				}
 			}
 
-			_SendMessageW( g_hWnd_call_log, LVM_SETCOLUMNORDERARRAY, total_columns1, ( LPARAM )arr );
+			_SendMessageW( g_hWnd_call_log, LVM_SETCOLUMNORDERARRAY, g_total_columns3, ( LPARAM )arr );
 
-			for ( char i = 0; i < NUM_COLUMNS2; ++i )
+			for ( char i = 0; i < NUM_COLUMNS4; ++i )
 			{
 				if ( *contact_list_columns[ i ] != -1 )
 				{
 					lvc.pszText = contact_list_string_table[ i ];
 					lvc.cx = *contact_list_columns_width[ i ];
-					_SendMessageW( g_hWnd_contact_list, LVM_INSERTCOLUMN, total_columns2, ( LPARAM )&lvc );
+					_SendMessageW( g_hWnd_contact_list, LVM_INSERTCOLUMN, g_total_columns4, ( LPARAM )&lvc );
 
-					arr[ total_columns2++ ] = *contact_list_columns[ i ];
+					arr[ g_total_columns4++ ] = *contact_list_columns[ i ];
 				}
 			}
 
-			_SendMessageW( g_hWnd_contact_list, LVM_SETCOLUMNORDERARRAY, total_columns2, ( LPARAM )arr );
+			_SendMessageW( g_hWnd_contact_list, LVM_SETCOLUMNORDERARRAY, g_total_columns4, ( LPARAM )arr );
 
-			for ( char i = 0; i < NUM_COLUMNS3; ++i )
+			for ( char i = 0; i < NUM_COLUMNS5; ++i )
 			{
 				if ( *ignore_list_columns[ i ] != -1 )
 				{
-					lvc.pszText = ignore_list_string_table[ i ];
+					lvc.pszText = allow_ignore_list_string_table[ i ];
 					lvc.cx = *ignore_list_columns_width[ i ];
-					_SendMessageW( g_hWnd_ignore_list, LVM_INSERTCOLUMN, total_columns3, ( LPARAM )&lvc );
+					_SendMessageW( g_hWnd_ignore_list, LVM_INSERTCOLUMN, g_total_columns5, ( LPARAM )&lvc );
 
-					arr[ total_columns3++ ] = *ignore_list_columns[ i ];
+					arr[ g_total_columns5++ ] = *ignore_list_columns[ i ];
 				}
 			}
 
-			_SendMessageW( g_hWnd_ignore_list, LVM_SETCOLUMNORDERARRAY, total_columns3, ( LPARAM )arr );
+			_SendMessageW( g_hWnd_ignore_list, LVM_SETCOLUMNORDERARRAY, g_total_columns5, ( LPARAM )arr );
 
-			for ( char i = 0; i < NUM_COLUMNS4; ++i )
+			for ( char i = 0; i < NUM_COLUMNS6; ++i )
 			{
 				if ( *ignore_cid_list_columns[ i ] != -1 )
 				{
-					lvc.pszText = ignore_cid_list_string_table[ i ];
+					lvc.pszText = allow_ignore_cid_list_string_table[ i ];
 					lvc.cx = *ignore_cid_list_columns_width[ i ];
-					_SendMessageW( g_hWnd_ignore_cid_list, LVM_INSERTCOLUMN, total_columns4, ( LPARAM )&lvc );
+					_SendMessageW( g_hWnd_ignore_cid_list, LVM_INSERTCOLUMN, g_total_columns6, ( LPARAM )&lvc );
 
-					arr[ total_columns4++ ] = *ignore_cid_list_columns[ i ];
+					arr[ g_total_columns6++ ] = *ignore_cid_list_columns[ i ];
 				}
 			}
 
-			_SendMessageW( g_hWnd_ignore_cid_list, LVM_SETCOLUMNORDERARRAY, total_columns4, ( LPARAM )arr );
+			_SendMessageW( g_hWnd_ignore_cid_list, LVM_SETCOLUMNORDERARRAY, g_total_columns6, ( LPARAM )arr );
 
 			if ( cfg_tray_icon )
 			{
@@ -836,81 +2125,34 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 				_Shell_NotifyIconW( NIM_ADD, &g_nid );
 			}
 
-			HANDLE thread = NULL;
+			g_hWnd_tooltip = _CreateWindowExW( WS_EX_TOPMOST, TOOLTIPS_CLASS, NULL, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, g_hWnd_call_log, NULL, NULL, NULL );
 
-			if ( cfg_enable_call_log_history )
-			{
-				importexportinfo *iei = ( importexportinfo * )GlobalAlloc( GMEM_FIXED, sizeof( importexportinfo ) );
+			TOOLINFO tti;
+			_memzero( &tti, sizeof( TOOLINFO ) );
+			tti.cbSize = sizeof( TOOLINFO );
+			tti.uFlags = TTF_SUBCLASS;
+			tti.hwnd = g_hWnd_call_log;
 
-				// Include an empty string.
-				iei->file_paths = ( wchar_t * )GlobalAlloc( GPTR, sizeof( wchar_t ) * ( MAX_PATH + 1 ) );
-				_wmemcpy_s( iei->file_paths, MAX_PATH, base_directory, base_directory_length );
-				_wmemcpy_s( iei->file_paths + ( base_directory_length + 1 ), MAX_PATH - ( base_directory_length - 1 ), L"call_log_history\0", 17 );
-				iei->file_paths[ base_directory_length + 17 ] = 0;	// Sanity.
-				iei->file_offset = ( unsigned short )( base_directory_length + 1 );
-				iei->file_type = LOAD_CALL_LOG_HISTORY;
+			_SendMessageW( g_hWnd_tooltip, TTM_ADDTOOL, 0, ( LPARAM )&tti );
+			_SendMessageW( g_hWnd_tooltip, TTM_SETMAXTIPWIDTH, 0, sizeof( wchar_t ) * ( 2 * MAX_PATH ) );
+			_SendMessageW( g_hWnd_tooltip, TTM_SETDELAYTIME, TTDT_AUTOPOP, 32767 );
+			_SendMessageW( g_hWnd_tooltip, TTM_SETDELAYTIME, TTDT_INITIAL, 2000 );
 
-				// iei will be freed in the import_list thread.
-				thread = ( HANDLE )_CreateThread( NULL, 0, import_list, ( void * )iei, 0, NULL );
-				if ( thread != NULL )
-				{
-					CloseHandle( thread );
-				}
-				else
-				{
-					GlobalFree( iei->file_paths );
-					GlobalFree( iei );
-				}
-			}
+			_SendMessageW( g_hWnd_call_log, LVM_SETTOOLTIPS, ( WPARAM )g_hWnd_tooltip, 0 );
 
-			ignoreupdateinfo *iui = ( ignoreupdateinfo * )GlobalAlloc( GMEM_FIXED, sizeof( ignoreupdateinfo ) );
-			iui->ii = NULL;
-			iui->phone_number = NULL;
-			iui->action = 2;	// Add all ignore_list items.
-			iui->hWnd = g_hWnd_ignore_list;
+			// The custom caller ID shouldn't be larger than 257 characters.
+			tooltip_buffer = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * 512 );
 
-			// iui is freed in the update_ignore_list thread.
-			thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL );
-			if ( thread != NULL )
-			{
-				CloseHandle( thread );
-			}
-			else
-			{
-				GlobalFree( iui );
-			}
+			// Create the menus after we've gotten the total active columns (total_columns1, 2, etc.).
+			CreateMenus();
 
-			ignorecidupdateinfo *icidui = ( ignorecidupdateinfo * )GlobalAlloc( GMEM_FIXED, sizeof( ignorecidupdateinfo ) );
-			icidui->icidi = NULL;
-			icidui->caller_id = NULL;
-			icidui->action = 2;	// Add all ignore_cid_list items.
-			icidui->hWnd = g_hWnd_ignore_cid_list;
-			icidui->match_case = false;
-			icidui->match_whole_word = false;
+			// Set our menu bar.
+			_SetMenu( hWnd, g_hMenu );
 
-			// icidui is freed in the update_ignore_cid_list thread.
-			thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_cid_list, ( void * )icidui, 0, NULL );
-			if ( thread != NULL )
-			{
-				CloseHandle( thread );
-			}
-			else
-			{
-				GlobalFree( icidui );
-			}
 
-			contactupdateinfo *cui = ( contactupdateinfo * )GlobalAlloc( GPTR, sizeof( contactupdateinfo ) );
-			cui->action = 2;
-						
-			thread = ( HANDLE )_CreateThread( NULL, 0, update_contact_list, ( void * )cui, 0, NULL );
-			if ( thread != NULL )
-			{
-				CloseHandle( thread );
-			}
-			else
-			{
-				GlobalFree( cui );
-			}
+			//////////////////////////////
+
+			LoadLists();
 
 			if ( cfg_check_for_updates )
 			{
@@ -933,6 +2175,47 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 			return 0;
 		}
 		break;
+
+		/////////////////////////////////////
+		#ifdef USE_DEBUG_DIRECTORY
+		/////////////////////////////////////
+		case WM_MBUTTONUP:
+		{
+			SYSTEMTIME SystemTime;
+			FILETIME FileTime;
+
+			GetLocalTime( &SystemTime );
+			SystemTimeToFileTime( &SystemTime, &FileTime );
+
+			display_info *di = ( display_info * )GlobalAlloc( GPTR, sizeof( display_info ) );
+
+			di->caller_id = GlobalStrDupW( L"Caller ID" );
+			di->phone_number = GlobalStrDupW( L"8181239999" );
+
+			di->time.LowPart = FileTime.dwLowDateTime;
+			di->time.HighPart = FileTime.dwHighDateTime;
+			di->process_incoming = true;
+
+			// This will also ignore the call if it's in our lists.
+			HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_call_log, ( void * )di, 0, NULL );
+			if ( thread != NULL )
+			{
+				CloseHandle( thread );
+			}
+			else
+			{
+				// This is all that's set above.
+				GlobalFree( di->phone_number );
+				GlobalFree( di->caller_id );
+				GlobalFree( di );
+			}
+
+			return 0;
+		}
+		break;
+		/////////////////////////////////////
+		#endif
+		/////////////////////////////////////
 
 		case WM_WINDOWPOSCHANGED:
 		{
@@ -985,7 +2268,7 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 
 			// Allow our main window to attach to the desktop edge.
 			_SystemParametersInfoW( SPI_GETWORKAREA, 0, &wa, 0 );			
-			if( is_close( rc->left, wa.left ) )				// Attach to left side of the desktop.
+			if ( is_close( rc->left, wa.left ) )				// Attach to left side of the desktop.
 			{
 				_OffsetRect( rc, wa.left - rc->left, 0 );
 			}
@@ -994,7 +2277,7 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 				_OffsetRect( rc, wa.right - rc->right, 0 );
 			}
 
-			if( is_close( rc->top, wa.top ) )				// Attach to top of the desktop.
+			if ( is_close( rc->top, wa.top ) )				// Attach to top of the desktop.
 			{
 				_OffsetRect( rc, 0, wa.top - rc->top );
 			}
@@ -1065,14 +2348,18 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 			_SetWindowPos( g_hWnd_call_log, NULL, 1, rc_tab.top - 1, rc.right - rc.left - 4, rc.bottom - rc_tab.top - 1, SWP_NOZORDER );
 			_SetWindowPos( g_hWnd_contact_list, NULL, 1, rc_tab.top - 1, rc.right - rc.left - 4, rc.bottom - rc_tab.top - 1, SWP_NOZORDER );
 
+			_SetWindowPos( g_hWnd_allow_tab, NULL, 8, 8 + rc_tab.top, rc.right - rc.left - 16, rc.bottom - rc_tab.top - 16, SWP_NOZORDER );
 			_SetWindowPos( g_hWnd_ignore_tab, NULL, 8, 8 + rc_tab.top, rc.right - rc.left - 16, rc.bottom - rc_tab.top - 16, SWP_NOZORDER );
 
-			_GetClientRect( g_hWnd_ignore_tab, &rc );
+			_GetClientRect( g_hWnd_allow_tab, &rc );
 			_SetRect( &rc_tab, 0, 0, rc.right, rc.bottom );
-			_SendMessageW( g_hWnd_ignore_tab, TCM_ADJUSTRECT, FALSE, ( LPARAM )&rc_tab );
+			_SendMessageW( g_hWnd_allow_tab, TCM_ADJUSTRECT, FALSE, ( LPARAM )&rc_tab );
 
 			_SetWindowPos( g_hWnd_ignore_cid_list, NULL, 1, rc_tab.top - 1, rc.right - rc.left - 4, rc.bottom - rc_tab.top - 1, SWP_NOZORDER );
 			_SetWindowPos( g_hWnd_ignore_list, NULL, 1, rc_tab.top - 1, rc.right - rc.left - 4, rc.bottom - rc_tab.top - 1, SWP_NOZORDER );
+
+			_SetWindowPos( g_hWnd_allow_cid_list, NULL, 1, rc_tab.top - 1, rc.right - rc.left - 4, rc.bottom - rc_tab.top - 1, SWP_NOZORDER );
+			_SetWindowPos( g_hWnd_allow_list, NULL, 1, rc_tab.top - 1, rc.right - rc.left - 4, rc.bottom - rc_tab.top - 1, SWP_NOZORDER );
 
 			return 0;
 		}
@@ -1121,968 +2408,8 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 
 		case WM_COMMAND:
 		{
-			// Check to see if our command is a menu item.
-			if ( HIWORD( wParam ) == 0 )
-			{
-				// Get the id of the menu item.
-				switch ( LOWORD( wParam ) )
-				{
-					case MENU_CLOSE_TAB:
-					{
-						switch ( context_tab_index )
-						{
-							case 0:
-							{
-								_SendMessageW( hWnd, WM_COMMAND, MAKEWPARAM( MENU_VIEW_CALL_LOG, 0 ), 0 );
-							}
-							break;
+			HandleCommand( hWnd, wParam, lParam );
 
-							case 1:
-							{
-								_SendMessageW( hWnd, WM_COMMAND, MAKEWPARAM( MENU_VIEW_CONTACT_LIST, 0 ), 0 );
-							}
-							break;
-
-							case 2:
-							{
-								_SendMessageW( hWnd, WM_COMMAND, MAKEWPARAM( MENU_VIEW_IGNORE_LISTS, 0 ), 0 );
-							}
-							break;
-						}
-					}
-					break;
-
-					case MENU_VIEW_CALL_LOG:
-					case MENU_VIEW_CONTACT_LIST:
-					case MENU_VIEW_IGNORE_LISTS:
-					{
-						char *tab_index = NULL;
-						HWND t_hWnd = NULL;
-
-						TCITEM ti;
-						_memzero( &ti, sizeof( TCITEM ) );
-						ti.mask = TCIF_PARAM | TCIF_TEXT;			// The tab will have text and an lParam value.
-
-						if ( LOWORD( wParam ) == MENU_VIEW_CALL_LOG )
-						{
-							tab_index = &cfg_tab_order1;
-							t_hWnd = g_hWnd_call_log;
-							ti.pszText = ( LPWSTR )ST_Call_Log;		// This will simply set the width of each tab item. We're not going to use it.
-						}
-						else if ( LOWORD( wParam ) == MENU_VIEW_CONTACT_LIST )
-						{
-							tab_index = &cfg_tab_order2;
-							t_hWnd = g_hWnd_contact_list;
-							ti.pszText = ( LPWSTR )ST_Contact_List;		// This will simply set the width of each tab item. We're not going to use it.
-						}
-						else if ( LOWORD( wParam ) == MENU_VIEW_IGNORE_LISTS )
-						{
-							tab_index = &cfg_tab_order3;
-							t_hWnd = g_hWnd_ignore_tab;
-							ti.pszText = ( LPWSTR )ST_Ignore_Lists;		// This will simply set the width of each tab item. We're not going to use it.
-						}
-
-						if ( *tab_index != -1 )	// Remove the tab.
-						{
-							// Go through all the tabs and decrease the order values that are greater than the index we removed.
-							for ( unsigned char i = 0; i < NUM_TABS; ++i )
-							{
-								if ( *tab_order[ i ] != -1 && *tab_order[ i ] > *tab_index )
-								{
-									( *( tab_order[ i ] ) )--;
-								}
-							}
-
-							*tab_index = -1;
-
-							for ( int i = 0; i < total_tabs; ++i )
-							{
-								_SendMessageW( g_hWnd_tab, TCM_GETITEM, i, ( LPARAM )&ti );
-
-								if ( ( HWND )ti.lParam == t_hWnd )
-								{
-									int index = _SendMessageW( g_hWnd_tab, TCM_GETCURSEL, 0, 0 );		// Get the selected tab
-
-									// If the tab we remove is the last tab and it is focused, then set focus to the tab on the left.
-									// If the tab we remove is focused and there is a tab to the right, then set focus to the tab on the right.
-									if ( total_tabs > 1 && i == index )
-									{
-										_SendMessageW( g_hWnd_tab, TCM_SETCURFOCUS, ( i < total_tabs - 1 ? i + 1 : i - 1 ), 0 );	// Give the new tab focus.
-									}
-
-									_SendMessageW( g_hWnd_tab, TCM_DELETEITEM, i, 0 );
-									--total_tabs;
-
-									// Hide the tab control if no more tabs are visible.
-									if ( total_tabs == 0 )
-									{
-										_ShowWindow( ( HWND )ti.lParam, SW_HIDE );
-										_ShowWindow( g_hWnd_tab, SW_HIDE );
-									}
-								}
-							}
-						}
-						else	// Add the tab.
-						{
-							*tab_index = total_tabs;	// The new tab will be added to the end.
-
-							ti.lParam = ( LPARAM )t_hWnd;
-							_SendMessageW( g_hWnd_tab, TCM_INSERTITEM, total_tabs, ( LPARAM )&ti );	// Insert a new tab at the end.
-
-							// If no tabs were previously visible, then show the tab control.
-							if ( total_tabs == 0 )
-							{
-								_ShowWindow( g_hWnd_tab, SW_SHOW );
-								_ShowWindow( t_hWnd, SW_SHOW );
-
-								_SendMessageW( hWnd, WM_SIZE, 0, 0 );	// Forces the window to resize the listview.
-							}
-
-							++total_tabs;
-						}
-
-						_CheckMenuItem( g_hMenu, LOWORD( wParam ), ( *tab_index != -1 ? MF_CHECKED : MF_UNCHECKED ) );
-					}
-					break;
-
-					case MENU_COPY_SEL_COL1:
-					case MENU_COPY_SEL_COL2:
-					case MENU_COPY_SEL_COL3:
-					case MENU_COPY_SEL_COL4:
-					case MENU_COPY_SEL_COL5:
-					case MENU_COPY_SEL_COL21:
-					case MENU_COPY_SEL_COL22:
-					case MENU_COPY_SEL_COL23:
-					case MENU_COPY_SEL_COL24:
-					case MENU_COPY_SEL_COL25:
-					case MENU_COPY_SEL_COL26:
-					case MENU_COPY_SEL_COL27:
-					case MENU_COPY_SEL_COL28:
-					case MENU_COPY_SEL_COL29:
-					case MENU_COPY_SEL_COL210:
-					case MENU_COPY_SEL_COL211:
-					case MENU_COPY_SEL_COL212:
-					case MENU_COPY_SEL_COL213:
-					case MENU_COPY_SEL_COL214:
-					case MENU_COPY_SEL_COL215:
-					case MENU_COPY_SEL_COL216:
-					case MENU_COPY_SEL_COL31:
-					case MENU_COPY_SEL_COL32:
-					case MENU_COPY_SEL_COL41:
-					case MENU_COPY_SEL_COL42:
-					case MENU_COPY_SEL_COL43:
-					case MENU_COPY_SEL_COL44:
-					case MENU_COPY_SEL:
-					{
-						HWND c_hWnd = GetCurrentListView();
-						if ( c_hWnd != NULL )
-						{
-							copyinfo *ci = ( copyinfo * )GlobalAlloc( GMEM_FIXED, sizeof( copyinfo ) );
-							ci->column = LOWORD( wParam );
-							ci->hWnd = c_hWnd;
-
-							// ci is freed in the copy items thread.
-							HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, copy_items, ( void * )ci, 0, NULL );
-							if ( thread != NULL )
-							{
-								CloseHandle( thread );
-							}
-							else
-							{
-								GlobalFree( ci );
-							}
-						}
-					}
-					break;
-
-					case MENU_REMOVE_SEL:
-					{
-						HWND c_hWnd = GetCurrentListView();
-						if ( c_hWnd != NULL )
-						{
-							if ( c_hWnd == g_hWnd_call_log )
-							{
-								if ( _MessageBoxW( hWnd, ST_PROMPT_remove_entries, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONQUESTION | MB_YESNO ) == IDYES )
-								{
-									removeinfo *ri = ( removeinfo * )GlobalAlloc( GMEM_FIXED, sizeof( removeinfo ) );
-									ri->disable_critical_section = false;
-									ri->hWnd = g_hWnd_call_log;
-
-									// ri will be freed in the remove_items thread.
-									HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, remove_items, ( void * )ri, 0, NULL );
-									if ( thread != NULL )
-									{
-										CloseHandle( thread );
-									}
-									else
-									{
-										GlobalFree( ri );
-									}
-								}
-							}
-							else if ( c_hWnd == g_hWnd_contact_list )
-							{
-								// Remove the first selected (not the focused & selected).
-								LVITEM lvi;
-								_memzero( &lvi, sizeof( LVITEM ) );
-								lvi.mask = LVIF_PARAM;
-								lvi.iItem = _SendMessageW( g_hWnd_contact_list, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
-
-								if ( lvi.iItem != -1 )
-								{
-									if ( _MessageBoxW( hWnd, ST_PROMPT_remove_entries_contact_list, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONQUESTION | MB_YESNO ) == IDYES )
-									{
-										contactupdateinfo *cui = ( contactupdateinfo * )GlobalAlloc( GPTR, sizeof( contactupdateinfo ) );
-										cui->action = 1;	// 1 = Remove, 0 = Add
-
-										// cui is freed in the update_contact_list thread.
-										HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_contact_list, ( void * )cui, 0, NULL );
-										if ( thread != NULL )
-										{
-											CloseHandle( thread );
-										}
-										else
-										{
-											GlobalFree( cui );
-										}
-									}
-								}
-							}
-							else if ( c_hWnd == g_hWnd_ignore_list )
-							{
-								// Retrieve the lParam value from the selected listview item.
-								LVITEM lvi;
-								_memzero( &lvi, sizeof( LVITEM ) );
-								lvi.mask = LVIF_PARAM;
-								lvi.iItem = _SendMessageW( g_hWnd_ignore_list, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
-
-								if ( lvi.iItem != -1 )
-								{
-									if ( _MessageBoxW( hWnd, ST_PROMPT_remove_entries, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONQUESTION | MB_YESNO ) == IDYES )
-									{
-										ignoreupdateinfo *iui = ( ignoreupdateinfo * )GlobalAlloc( GMEM_FIXED, sizeof( ignoreupdateinfo ) );
-										iui->ii = NULL;
-										iui->phone_number = NULL;
-										iui->action = 1;	// 1 = Remove, 0 = Add
-										iui->hWnd = g_hWnd_ignore_list;
-
-										// iui is freed in the update_ignore_list thread.
-										HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL );
-										if ( thread != NULL )
-										{
-											CloseHandle( thread );
-										}
-										else
-										{
-											GlobalFree( iui );
-										}
-									}
-								}
-							}
-							else if ( c_hWnd == g_hWnd_ignore_cid_list )
-							{
-								// Retrieve the lParam value from the selected listview item.
-								LVITEM lvi;
-								_memzero( &lvi, sizeof( LVITEM ) );
-								lvi.mask = LVIF_PARAM;
-								lvi.iItem = _SendMessageW( g_hWnd_ignore_cid_list, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
-
-								if ( lvi.iItem != -1 )
-								{
-									if ( _MessageBoxW( hWnd, ST_PROMPT_remove_entries, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONQUESTION | MB_YESNO ) == IDYES )
-									{
-										ignorecidupdateinfo *icidui = ( ignorecidupdateinfo * )GlobalAlloc( GMEM_FIXED, sizeof( ignorecidupdateinfo ) );
-										icidui->icidi = NULL;
-										icidui->caller_id = NULL;
-										icidui->match_case = false;
-										icidui->match_whole_word = false;
-										icidui->action = 1;	// 1 = Remove, 0 = Add
-										icidui->hWnd = g_hWnd_ignore_cid_list;
-
-										// icidui is freed in the update_ignore_cid_list thread.
-										HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_cid_list, ( void * )icidui, 0, NULL );
-										if ( thread != NULL )
-										{
-											CloseHandle( thread );
-										}
-										else
-										{
-											GlobalFree( icidui );
-										}
-									}
-								}
-							}
-						}
-					}
-					break;
-
-					case MENU_SELECT_ALL:
-					{
-						HWND c_hWnd = GetCurrentListView();
-						if ( c_hWnd != NULL )
-						{
-							// Set the state of all items to selected.
-							LVITEM lvi;
-							_memzero( &lvi, sizeof( LVITEM ) );
-							lvi.mask = LVIF_STATE;
-							lvi.state = LVIS_SELECTED;
-							lvi.stateMask = LVIS_SELECTED;
-							_SendMessageW( c_hWnd, LVM_SETITEMSTATE, -1, ( LPARAM )&lvi );
-
-							UpdateMenus( UM_ENABLE );
-						}
-					}
-					break;
-
-					case MENU_OPEN_WEB_PAGE:
-					{
-						LVITEM lvi;
-						_memzero( &lvi, sizeof( LVITEM ) );
-						lvi.mask = LVIF_PARAM;
-						lvi.iItem = _SendMessageW( g_hWnd_contact_list, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
-
-						if ( lvi.iItem != -1 )
-						{
-							_SendMessageW( g_hWnd_contact_list, LVM_GETITEM, 0, ( LPARAM )&lvi );
-
-							contactinfo *ci = ( contactinfo * )lvi.lParam;
-							if ( ci != NULL && ci->web_page != NULL )
-							{
-								bool destroy = true;
-								#ifndef OLE32_USE_STATIC_LIB
-									if ( ole32_state == OLE32_STATE_SHUTDOWN )
-									{
-										destroy = InitializeOle32();
-									}
-								#endif
-
-								if ( destroy )
-								{
-									_CoInitializeEx( NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE );
-								}
-
-								_ShellExecuteW( NULL, L"open", ci->web_page, NULL, NULL, SW_SHOWNORMAL );
-
-								if ( destroy )
-								{
-									_CoUninitialize();
-								}
-							}
-						}
-					}
-					break;
-
-					case MENU_SEARCH_WITH_1:
-					case MENU_SEARCH_WITH_2:
-					case MENU_SEARCH_WITH_3:
-					case MENU_SEARCH_WITH_4:
-					case MENU_SEARCH_WITH_5:
-					case MENU_SEARCH_WITH_6:
-					case MENU_SEARCH_WITH_7:
-					case MENU_SEARCH_WITH_8:
-					case MENU_SEARCH_WITH_9:
-					{
-						MENUITEMINFO mii;
-						_memzero( &mii, sizeof( MENUITEMINFO ) );
-						mii.cbSize = sizeof( MENUITEMINFO );
-						mii.fMask = MIIM_DATA;
-						_GetMenuItemInfoW( g_hMenu, MENU_SEARCH_WITH, FALSE, &mii );
-
-						unsigned short column = ( unsigned short )mii.dwItemData;
-
-						char *phone_number = GetSelectedColumnPhoneNumber( column );
-						if ( phone_number != NULL && phone_number[ 0 ] == '+' )
-						{
-							++phone_number;
-						}
-
-						wchar_t *url = ( wchar_t * )GlobalAlloc( GPTR, sizeof( wchar_t ) * 128 );
-
-						switch ( LOWORD( wParam ) )
-						{
-							case MENU_SEARCH_WITH_1: { __snwprintf( url, 128, L"http://800notes.com/Phone.aspx/%S", SAFESTRA( phone_number ) ); } break;
-							case MENU_SEARCH_WITH_2: { __snwprintf( url, 128, L"https://www.bing.com/search?q=%S", SAFESTRA( phone_number ) ); } break;
-							case MENU_SEARCH_WITH_3: { __snwprintf( url, 128, L"http://callerr.com/%S", SAFESTRA( phone_number ) ); } break;
-							case MENU_SEARCH_WITH_4: { __snwprintf( url, 128, L"https://www.google.com/search?&q=%S", SAFESTRA( phone_number ) ); } break;
-							case MENU_SEARCH_WITH_5: { __snwprintf( url, 128, L"http://www.okcaller.com/detail.php?number=%S", SAFESTRA( phone_number ) ); } break;
-							case MENU_SEARCH_WITH_6: { __snwprintf( url, 128, L"https://www.phonetray.com/lookup/Number/%S", SAFESTRA( phone_number ) ); } break;
-							case MENU_SEARCH_WITH_7: { __snwprintf( url, 128, L"http://www.whitepages.com/phone/%S", SAFESTRA( phone_number ) ); } break;
-							case MENU_SEARCH_WITH_8: { __snwprintf( url, 128, L"http://whocallsme.com/Phone-Number.aspx/%S", SAFESTRA( phone_number ) ); } break;
-							case MENU_SEARCH_WITH_9: { __snwprintf( url, 128, L"http://www.whycall.me/%S.html", SAFESTRA( phone_number ) ); } break;
-						}
-
-						bool destroy = true;
-						#ifndef OLE32_USE_STATIC_LIB
-							if ( ole32_state == OLE32_STATE_SHUTDOWN )
-							{
-								destroy = InitializeOle32();
-							}
-						#endif
-
-						if ( destroy )
-						{
-							_CoInitializeEx( NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE );
-						}
-
-						_ShellExecuteW( NULL, L"open", url, NULL, NULL, SW_SHOWNORMAL );
-
-						if ( destroy )
-						{
-							_CoUninitialize();
-						}
-
-						GlobalFree( url );
-					}
-					break;
-
-					case MENU_OPEN_EMAIL_ADDRESS:
-					{
-						LVITEM lvi;
-						_memzero( &lvi, sizeof( LVITEM ) );
-						lvi.mask = LVIF_PARAM;
-						lvi.iItem = _SendMessageW( g_hWnd_contact_list, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
-
-						if ( lvi.iItem != -1 )
-						{
-							_SendMessageW( g_hWnd_contact_list, LVM_GETITEM, 0, ( LPARAM )&lvi );
-
-							contactinfo *ci = ( contactinfo * )lvi.lParam;
-							if ( ci != NULL && ci->email_address != NULL )
-							{
-								int email_address_length = lstrlenW( ci->email_address );
-								wchar_t *mailto = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * ( email_address_length + 8 ) );
-								_wmemcpy_s( mailto, email_address_length + 8, L"mailto:", 7 );
-								_wmemcpy_s( mailto + 7, email_address_length + 1, ci->email_address, email_address_length );
-								mailto[ email_address_length + 7 ] = 0;	// Sanity.
-
-								bool destroy = true;
-								#ifndef OLE32_USE_STATIC_LIB
-									if ( ole32_state == OLE32_STATE_SHUTDOWN )
-									{
-										destroy = InitializeOle32();
-									}
-								#endif
-
-								if ( destroy )
-								{
-									_CoInitializeEx( NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE );
-								}
-
-								_ShellExecuteW( NULL, L"open", mailto, NULL, NULL, SW_SHOWNORMAL );
-
-								if ( destroy )
-								{
-									_CoUninitialize();
-								}
-
-								GlobalFree( mailto );
-							}
-						}
-					}
-					break;
-
-					case MENU_INCOMING_IGNORE:
-					{
-						LVITEM lvi;
-						_memzero( &lvi, sizeof( LVITEM ) );
-						lvi.mask = LVIF_PARAM;
-						lvi.iItem = _SendMessageW( g_hWnd_call_log, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
-
-						if ( lvi.iItem != -1 )
-						{
-							_SendMessageW( g_hWnd_call_log, LVM_GETITEM, 0, ( LPARAM )&lvi );
-
-							displayinfo *di = ( displayinfo * )lvi.lParam;
-
-							di->process_incoming = false;
-							di->ci.ignored = true;
-
-							_InvalidateRect( g_hWnd_call_log, NULL, TRUE );
-
-							IgnoreIncomingCall( di->incoming_call );
-						}
-					}
-					break;
-
-					case MENU_ADD_IGNORE_LIST:	// ignore list listview right click.
-					{
-						if ( g_hWnd_ignore_phone_number == NULL )
-						{
-							// Allow wildcard input. (Last parameter of CreateWindow is 1)
-							g_hWnd_ignore_phone_number = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"phone", ST_Ignore_Phone_Number, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 205 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 255 ) / 2 ), 205, 255, NULL, NULL, NULL, ( LPVOID )1 );
-						}
-
-						_SendMessageW( g_hWnd_ignore_phone_number, WM_PROPAGATE, 0, 0 );
-
-						_SetForegroundWindow( g_hWnd_ignore_phone_number );
-					}
-					break;
-
-					case MENU_EDIT_IGNORE_CID_LIST:
-					case MENU_ADD_IGNORE_CID_LIST:	// ignore cid list listview right click.
-					{
-						if ( g_hWnd_ignore_cid == NULL )
-						{
-							g_hWnd_ignore_cid = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"cid", ST_Ignore_Caller_ID_Name, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 205 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 170 ) / 2 ), 205, 170, NULL, NULL, NULL, ( LPVOID )0 );
-						}
-
-						if ( LOWORD( wParam ) == MENU_ADD_IGNORE_CID_LIST )
-						{
-							_SendMessageW( g_hWnd_ignore_cid, WM_PROPAGATE, 1, 0 );
-						}
-						else if ( LOWORD( wParam ) == MENU_EDIT_IGNORE_CID_LIST )
-						{
-							LVITEM lvi;
-							_memzero( &lvi, sizeof( LVITEM ) );
-							lvi.mask = LVIF_PARAM;
-							lvi.iItem = _SendMessageW( g_hWnd_ignore_cid_list, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
-							if ( lvi.iItem != -1 )
-							{
-								_SendMessageW( g_hWnd_ignore_cid_list, LVM_GETITEM, 0, ( LPARAM )&lvi );
-								_SendMessageW( g_hWnd_ignore_cid, WM_PROPAGATE, 2, lvi.lParam );
-							}
-						}
-
-						_SetForegroundWindow( g_hWnd_ignore_cid );
-					}
-					break;
-
-					case MENU_IGNORE_LIST:	// call log listview right click.
-					case MENU_IGNORE_CID_LIST:	// call log listview right click.
-					{
-						// Retrieve the lParam value from the selected listview item.
-						LVITEM lvi;
-						_memzero( &lvi, sizeof( LVITEM ) );
-						lvi.mask = LVIF_PARAM;
-						lvi.iItem = _SendMessageW( g_hWnd_call_log, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
-
-						if ( lvi.iItem != -1 )
-						{
-							_SendMessageW( g_hWnd_call_log, LVM_GETITEM, 0, ( LPARAM )&lvi );
-
-							if ( LOWORD( wParam ) == MENU_IGNORE_LIST )
-							{
-								// This item we've selected is in the ignorelist tree.
-								if ( ( ( displayinfo * )lvi.lParam )->ignore_phone_number )
-								{
-									if ( _MessageBoxW( hWnd, ST_PROMPT_remove_entries_ipn, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONQUESTION | MB_YESNO ) == IDYES )
-									{
-										ignoreupdateinfo *iui = ( ignoreupdateinfo * )GlobalAlloc( GMEM_FIXED, sizeof( ignoreupdateinfo ) );
-										iui->ii = NULL;
-										iui->phone_number = NULL;
-										iui->action = 1;	// 1 = Remove, 0 = Add
-										iui->hWnd = g_hWnd_call_log;
-
-										// iui is freed in the update_ignore_list thread.
-										HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL );
-										if ( thread != NULL )
-										{
-											CloseHandle( thread );
-										}
-										else
-										{
-											GlobalFree( iui );
-										}
-									}
-								}
-								else	// Add items to the ignore list.
-								{
-									ignoreupdateinfo *iui = ( ignoreupdateinfo * )GlobalAlloc( GMEM_FIXED, sizeof( ignoreupdateinfo ) );
-									iui->ii = NULL;
-									iui->phone_number = NULL;
-									iui->action = 0;	// 1 = Remove, 0 = Add
-									iui->hWnd = g_hWnd_call_log;
-
-									// iui is freed in the update_ignore_list thread.
-									HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL );
-									if ( thread != NULL )
-									{
-										CloseHandle( thread );
-									}
-									else
-									{
-										GlobalFree( iui );
-									}
-								}
-							}
-							else if ( LOWORD( wParam ) == MENU_IGNORE_CID_LIST )
-							{
-								// This item we've selected is in the ignorecidlist tree.
-								if ( ( ( displayinfo * )lvi.lParam )->ignore_cid_match_count > 0 )
-								{
-									if ( _MessageBoxW( hWnd, ST_PROMPT_remove_entries_icid, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONQUESTION | MB_YESNO ) == IDYES )
-									{
-										ignorecidupdateinfo *icidui = ( ignorecidupdateinfo * )GlobalAlloc( GMEM_FIXED, sizeof( ignorecidupdateinfo ) );
-										icidui->icidi = NULL;
-										icidui->caller_id = NULL;
-										icidui->match_case = false;
-										icidui->match_whole_word = false;
-										icidui->action = 1;	// 1 = Remove, 0 = Add
-										icidui->hWnd = g_hWnd_call_log;
-
-										// Remove items.
-										HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_cid_list, ( void * )icidui, 0, NULL );
-										if ( thread != NULL )
-										{
-											CloseHandle( thread );
-										}
-										else
-										{
-											GlobalFree( icidui );
-										}
-									}
-								}
-								else	// The item we've selected is not in the ignorecidlist tree. Prompt the user.
-								{
-									if ( g_hWnd_ignore_cid == NULL )
-									{
-										g_hWnd_ignore_cid = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"cid", ST_Ignore_Caller_ID_Name, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 205 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 170 ) / 2 ), 205, 170, NULL, NULL, NULL, ( LPVOID )0 );
-									}
-
-									_SendMessageW( g_hWnd_ignore_cid, WM_PROPAGATE, ( _SendMessageW( g_hWnd_call_log, LVM_GETSELECTEDCOUNT, 0, 0 ) > 1 ? 3 : 1 ), lvi.lParam );
-
-									_SetForegroundWindow( g_hWnd_ignore_cid );
-								}
-							}
-						}
-					}
-					break;
-
-					case MENU_SELECT_COLUMNS:
-					{
-						if ( g_hWnd_columns == NULL )
-						{
-							// Show columns window.
-							g_hWnd_columns = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"columns", ST_Select_Columns, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 410 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - MIN_HEIGHT ) / 2 ), 410, MIN_HEIGHT, NULL, NULL, NULL, NULL );
-						}
-
-						unsigned char index = 0;
-
-						HWND c_hWnd = GetCurrentListView();
-						if ( c_hWnd != NULL )
-						{
-							if ( c_hWnd == g_hWnd_call_log )
-							{
-								index = 0;
-							}
-							else if ( c_hWnd == g_hWnd_contact_list )
-							{
-								index = 1;
-							}
-							else if ( c_hWnd == g_hWnd_ignore_list || c_hWnd == g_hWnd_ignore_cid_list )
-							{
-								index = 2;
-							}
-						}
-						
-						_SendMessageW( g_hWnd_columns, WM_PROPAGATE, index, 0 );
-						
-						_SetForegroundWindow( g_hWnd_columns );
-					}
-					break;
-
-					case MENU_EDIT_CONTACT:
-					case MENU_ADD_CONTACT:
-					{
-						if ( g_hWnd_contact == NULL )
-						{
-							g_hWnd_contact = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"contact", ST_Contact_Information, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 550 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 320 ) / 2 ), 550, 320, NULL, NULL, NULL, NULL );
-						}
-
-						if ( LOWORD( wParam ) == MENU_EDIT_CONTACT )
-						{
-							LVITEM lvi;
-							_memzero( &lvi, sizeof( LVITEM ) );
-							lvi.mask = LVIF_PARAM;
-							lvi.iItem = _SendMessageW( g_hWnd_contact_list, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
-
-							if ( lvi.iItem != -1 )
-							{
-								_SendMessageW( g_hWnd_contact_list, LVM_GETITEM, 0, ( LPARAM )&lvi );
-
-								_SendMessageW( g_hWnd_contact, WM_PROPAGATE, MAKEWPARAM( CW_MODIFY, 0 ), lvi.lParam );	// Edit contact.
-							}
-						}
-						else
-						{
-							_SendMessageW( g_hWnd_contact, WM_PROPAGATE, MAKEWPARAM( CW_MODIFY, 0 ), 0 );	// Add contact.
-						}
-
-						_SetForegroundWindow( g_hWnd_contact );
-					}
-					break;
-
-					case MENU_MESSAGE_LOG:
-					{
-						if ( _IsWindowVisible( g_hWnd_message_log ) == TRUE )
-						{
-							_SetForegroundWindow( g_hWnd_message_log );
-						}
-						else
-						{
-							ShowWindow( g_hWnd_message_log, SW_SHOWNORMAL );
-						}
-					}
-					break;
-
-					case MENU_SAVE_CALL_LOG:
-					{
-						wchar_t *file_path = ( wchar_t * )GlobalAlloc( GPTR, sizeof( wchar_t ) * MAX_PATH );
-
-						OPENFILENAME ofn;
-						_memzero( &ofn, sizeof( OPENFILENAME ) );
-						ofn.lStructSize = sizeof( OPENFILENAME );
-						ofn.hwndOwner = hWnd;
-						ofn.lpstrFilter = L"CSV (Comma delimited) (*.csv)\0*.csv\0";
-						ofn.lpstrDefExt = L"csv";
-						ofn.lpstrTitle = ST_Save_Call_Log;
-						ofn.lpstrFile = file_path;
-						ofn.nMaxFile = MAX_PATH;
-						ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_READONLY;
-
-						if ( _GetSaveFileNameW( &ofn ) )
-						{
-							// file_path will be freed in the create_call_log_csv_file thread.
-							HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, create_call_log_csv_file, ( void * )file_path, 0, NULL );
-							if ( thread != NULL )
-							{
-								CloseHandle( thread );
-							}
-							else
-							{
-								GlobalFree( file_path );
-							}
-						}
-						else
-						{
-							GlobalFree( file_path );
-						}
-					}
-					break;
-
-					case MENU_EXPORT_LIST:
-					{
-						wchar_t *file_name = ( wchar_t * )GlobalAlloc( GPTR, sizeof( wchar_t ) * MAX_PATH );
-
-						OPENFILENAME ofn;
-						_memzero( &ofn, sizeof( OPENFILENAME ) );
-						ofn.lStructSize = sizeof( OPENFILENAME );
-						ofn.hwndOwner = hWnd;
-						ofn.lpstrFilter = L"Call Log History\0*.*\0" \
-										  L"Contact List\0*.*\0" \
-										  L"Ignore Caller ID Name List\0*.*\0" \
-										  L"Ignore Phone Number List\0*.*\0";
-						//ofn.lpstrDefExt = L"txt";
-						ofn.lpstrTitle = ST_Export;
-						ofn.lpstrFile = file_name;
-						ofn.nMaxFile = MAX_PATH;
-						ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_READONLY;
-
-						HWND c_hWnd = GetCurrentListView();
-						if ( c_hWnd != NULL )
-						{
-							if		( c_hWnd == g_hWnd_call_log )			{ ofn.nFilterIndex = 1; }
-							else if ( c_hWnd == g_hWnd_contact_list )		{ ofn.nFilterIndex = 2; }
-							else if ( c_hWnd == g_hWnd_ignore_cid_list )	{ ofn.nFilterIndex = 3; }
-							else if ( c_hWnd == g_hWnd_ignore_list )		{ ofn.nFilterIndex = 4; }
-						}
-
-						if ( _GetSaveFileNameW( &ofn ) )
-						{
-							importexportinfo *iei = ( importexportinfo * )GlobalAlloc( GMEM_FIXED, sizeof( importexportinfo ) );
-
-							/*// Change the default extension for the call log history.
-							if ( ofn.nFilterIndex == 1 )
-							{
-								if ( ofn.nFileExtension > 0 )
-								{
-									if ( ofn.nFileExtension <= MAX_PATH - 4 )	// Overwrite the existing extension.
-									{
-										_wmemcpy_s( file_name + ofn.nFileExtension, MAX_PATH - ofn.nFileExtension, L"bin\0", 4 );
-									}
-								}
-								//else	// No extension or the file was surrounded by quotes.
-								//{
-								//	int file_name_length = lstrlenW( file_name + ofn.nFileOffset );
-								//	if ( ( ofn.nFileOffset + file_name_length ) <= MAX_PATH - 5 )	// Append the extension.
-								//	{
-								//		_wmemcpy_s( file_name + ofn.nFileOffset + file_name_length, MAX_PATH - ofn.nFileOffset + file_name_length, L".bin\0", 5 );
-								//	}
-								//}
-							}*/
-
-							iei->file_paths = file_name;
-
-							iei->file_type = ( unsigned char )( 4 - ofn.nFilterIndex );
-
-							// iei will be freed in the export_list thread.
-							HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, export_list, ( void * )iei, 0, NULL );
-							if ( thread != NULL )
-							{
-								CloseHandle( thread );
-							}
-							else
-							{
-								GlobalFree( iei->file_paths );
-								GlobalFree( iei );
-							}
-						}
-						else
-						{
-							GlobalFree( file_name );
-						}
-					}
-					break;
-
-					case MENU_IMPORT_LIST:
-					{
-						wchar_t *file_name = ( wchar_t * )GlobalAlloc( GPTR, sizeof( wchar_t ) * ( MAX_PATH * MAX_PATH ) );
-
-						OPENFILENAME ofn;
-						_memzero( &ofn, sizeof( OPENFILENAME ) );
-						ofn.lStructSize = sizeof( OPENFILENAME );
-						ofn.hwndOwner = hWnd;
-						ofn.lpstrFilter = L"Call Log History\0*.*\0" \
-										  L"Contact List\0*.*\0" \
-										  L"Ignore Caller ID Name List\0*.*\0" \
-										  L"Ignore Phone Number List\0*.*\0";
-						ofn.lpstrTitle = ST_Import;
-						ofn.lpstrFile = file_name;
-						ofn.nMaxFile = MAX_PATH * MAX_PATH;
-						ofn.Flags = OFN_ALLOWMULTISELECT | OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_READONLY;
-
-						HWND c_hWnd = GetCurrentListView();
-						if ( c_hWnd != NULL )
-						{
-							if		( c_hWnd == g_hWnd_call_log )			{ ofn.nFilterIndex = 1; }
-							else if ( c_hWnd == g_hWnd_contact_list )		{ ofn.nFilterIndex = 2; }
-							else if ( c_hWnd == g_hWnd_ignore_cid_list )	{ ofn.nFilterIndex = 3; }
-							else if ( c_hWnd == g_hWnd_ignore_list )		{ ofn.nFilterIndex = 4; }
-						}
-
-						if ( _GetOpenFileNameW( &ofn ) )
-						{
-							importexportinfo *iei = ( importexportinfo * )GlobalAlloc( GMEM_FIXED, sizeof( importexportinfo ) );
-
-							iei->file_paths = file_name;
-							iei->file_offset = ofn.nFileOffset;
-							iei->file_type = ( unsigned char )( 4 - ofn.nFilterIndex );
-
-							// iei will be freed in the import_list thread.
-							HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, import_list, ( void * )iei, 0, NULL );
-							if ( thread != NULL )
-							{
-								CloseHandle( thread );
-							}
-							else
-							{
-								GlobalFree( iei->file_paths );
-								GlobalFree( iei );
-							}
-						}
-						else
-						{
-							GlobalFree( file_name );
-						}
-					}
-					break;
-
-					case MENU_OPTIONS:
-					{
-						if ( g_hWnd_options == NULL )
-						{
-							g_hWnd_options = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"options", ST_Options, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 470 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 395 ) / 2 ), 470, 395, NULL, NULL, NULL, NULL );
-							_ShowWindow( g_hWnd_options, SW_SHOWNORMAL );
-						}
-						_SetForegroundWindow( g_hWnd_options );
-					}
-					break;
-
-					case MENU_VZ_ENHANCED_HOME_PAGE:
-					{
-						bool destroy = true;
-						#ifndef OLE32_USE_STATIC_LIB
-							if ( ole32_state == OLE32_STATE_SHUTDOWN )
-							{
-								destroy = InitializeOle32();
-							}
-						#endif
-
-						if ( destroy )
-						{
-							_CoInitializeEx( NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE );
-						}
-
-						_ShellExecuteW( NULL, L"open", HOME_PAGE, NULL, NULL, SW_SHOWNORMAL );
-
-						if ( destroy )
-						{
-							_CoUninitialize();
-						}
-					}
-					break;
-
-					case MENU_CHECK_FOR_UPDATES:
-					{
-						update_check_state = 1;	// Manual update check.
-
-						if ( g_hWnd_update == NULL )
-						{
-							g_hWnd_update = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"update", ST_Checking_For_Updates___, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 510 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 240 ) / 2 ), 510, 240, NULL, NULL, NULL, NULL );
-
-							UPDATE_CHECK_INFO *update_info = ( UPDATE_CHECK_INFO * )GlobalAlloc( GPTR, sizeof( UPDATE_CHECK_INFO ) );
-							HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, CheckForUpdates, ( void * )update_info, 0, NULL );
-							if ( thread != NULL )
-							{
-								CloseHandle( thread );
-							}
-							else
-							{
-								GlobalFree( update_info );
-							}
-						}
-
-						_ShowWindow( g_hWnd_update, SW_SHOWNORMAL );
-						_SetForegroundWindow( g_hWnd_update );
-					}
-					break;
-
-					case MENU_ABOUT:
-					{
-						wchar_t msg[ 512 ];
-						__snwprintf( msg, 512, L"VZ Enhanced 56K is made free under the GPLv3 license.\r\n\r\n" \
-											   L"Version 1.0.0.5\r\n\r\n" \
-											   L"Built on %s, %s %d, %04d %d:%02d:%02d %s (UTC)\r\n\r\n" \
-											   L"Copyright \xA9 2013-2018 Eric Kutcher", GetDay( g_compile_time.wDayOfWeek ), GetMonth( g_compile_time.wMonth ), g_compile_time.wDay, g_compile_time.wYear, ( g_compile_time.wHour > 12 ? g_compile_time.wHour - 12 : ( g_compile_time.wHour != 0 ? g_compile_time.wHour : 12 ) ), g_compile_time.wMinute, g_compile_time.wSecond, ( g_compile_time.wHour >= 12 ? L"PM" : L"AM" ) );
-
-						_MessageBoxW( hWnd, msg, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONINFORMATION );
-					}
-					break;
-
-					case MENU_RESTORE:
-					{
-						if ( _IsIconic( hWnd ) )	// If minimized, then restore the window.
-						{
-							_ShowWindow( hWnd, SW_RESTORE );
-						}
-						else if ( _IsWindowVisible( hWnd ) == TRUE )	// If already visible, then flash the window.
-						{
-							_FlashWindow( hWnd, TRUE );
-						}
-						else	// If hidden, then show the window.
-						{
-							_ShowWindow( hWnd, SW_SHOW );
-						}
-					}
-					break;
-
-					case MENU_EXIT:
-					{
-						_SendMessageW( hWnd, WM_EXIT, 0, 0 );
-					}
-					break;
-				}
-			}
 			return 0;
 		}
 		break;
@@ -2099,14 +2426,12 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 					TCITEM tie;
 					_memzero( &tie, sizeof( TCITEM ) );
 					tie.mask = TCIF_PARAM; // Get the lparam value
-					int index = _SendMessageW( nmhdr->hwndFrom, TCM_GETCURSEL, 0, 0 );		// Get the selected tab
+					int index = ( int )_SendMessageW( nmhdr->hwndFrom, TCM_GETCURSEL, 0, 0 );		// Get the selected tab
 					if ( index != -1 )
 					{
 						_SendMessageW( nmhdr->hwndFrom, TCM_GETITEM, index, ( LPARAM )&tie );	// Get the selected tab's information
 						_ShowWindow( ( HWND )( tie.lParam ), SW_HIDE );
 					}
-
-					return FALSE;
 				}
 				break;
 
@@ -2117,16 +2442,16 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 					TCITEM tie;
 					_memzero( &tie, sizeof( TCITEM ) );
 					tie.mask = TCIF_PARAM; // Get the lparam value
-					int index = _SendMessageW( nmhdr->hwndFrom, TCM_GETCURSEL, 0, 0 );		// Get the selected tab
+					int index = ( int )_SendMessageW( nmhdr->hwndFrom, TCM_GETCURSEL, 0, 0 );		// Get the selected tab
 					if ( index != -1 )
 					{
 						_SendMessageW( nmhdr->hwndFrom, TCM_GETITEM, index, ( LPARAM )&tie );	// Get the selected tab's information
 
 						_ShowWindow( ( HWND )tie.lParam, SW_SHOW );
 
-						if ( ( HWND )tie.lParam == g_hWnd_ignore_tab )
+						if ( ( HWND )tie.lParam == g_hWnd_allow_tab || ( HWND )tie.lParam == g_hWnd_ignore_tab )
 						{
-							index = _SendMessageW( ( HWND )tie.lParam, TCM_GETCURSEL, 0, 0 );	// Get the selected tab
+							index = ( int )_SendMessageW( ( HWND )tie.lParam, TCM_GETCURSEL, 0, 0 );	// Get the selected tab
 							if ( index != -1 )
 							{
 								_SendMessageW( ( HWND )tie.lParam, TCM_GETITEM, index, ( LPARAM )&tie );	// Get the selected tab's information
@@ -2134,13 +2459,13 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 						}
 
 						_InvalidateRect( nmhdr->hwndFrom, NULL, TRUE );	// Repaint the control
+
+						ChangeMenuByHWND( ( HWND )tie.lParam );
+
+						_SetFocus( ( HWND )tie.lParam );	// Allows us to scroll the listview.
+
+						UpdateMenus( UM_ENABLE );
 					}
-
-					ChangeMenuByHWND( ( HWND )tie.lParam );
-
-					UpdateMenus( UM_ENABLE );
-
-					return FALSE;
                 }
 				break;
 
@@ -2153,29 +2478,37 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 					if ( nmh->iItem == 0 || nmh->pitem->iOrder == 0 )
 					{
 						// Make sure the # columns are visible.
-						if ( hWnd_parent == g_hWnd_call_log && *call_log_columns[ 0 ] != -1 )
+						if ( hWnd_parent == g_hWnd_allow_list && *allow_list_columns[ 0 ] != -1 )
 						{
-							nmh->pitem->iOrder = GetColumnIndexFromVirtualIndex( nmh->iItem, call_log_columns, NUM_COLUMNS1 );
+							nmh->pitem->iOrder = GetColumnIndexFromVirtualIndex( nmh->iItem, allow_list_columns, NUM_COLUMNS1 );
+							return TRUE;
+						}
+						else if ( hWnd_parent == g_hWnd_allow_cid_list && *allow_cid_list_columns[ 0 ] != -1 )
+						{
+							nmh->pitem->iOrder = GetColumnIndexFromVirtualIndex( nmh->iItem, allow_cid_list_columns, NUM_COLUMNS2 );
+							return TRUE;
+						}
+						else if ( hWnd_parent == g_hWnd_call_log && *call_log_columns[ 0 ] != -1 )
+						{
+							nmh->pitem->iOrder = GetColumnIndexFromVirtualIndex( nmh->iItem, call_log_columns, NUM_COLUMNS3 );
 							return TRUE;
 						}
 						else if ( hWnd_parent == g_hWnd_contact_list && *contact_list_columns[ 0 ] != -1 )
 						{
-							nmh->pitem->iOrder = GetColumnIndexFromVirtualIndex( nmh->iItem, contact_list_columns, NUM_COLUMNS2 );
+							nmh->pitem->iOrder = GetColumnIndexFromVirtualIndex( nmh->iItem, contact_list_columns, NUM_COLUMNS4 );
 							return TRUE;
 						}
 						else if ( hWnd_parent == g_hWnd_ignore_list && *ignore_list_columns[ 0 ] != -1 )
 						{
-							nmh->pitem->iOrder = GetColumnIndexFromVirtualIndex( nmh->iItem, ignore_list_columns, NUM_COLUMNS3 );
+							nmh->pitem->iOrder = GetColumnIndexFromVirtualIndex( nmh->iItem, ignore_list_columns, NUM_COLUMNS5 );
 							return TRUE;
 						}
 						else if ( hWnd_parent == g_hWnd_ignore_cid_list && *ignore_cid_list_columns[ 0 ] != -1 )
 						{
-							nmh->pitem->iOrder = GetColumnIndexFromVirtualIndex( nmh->iItem, ignore_cid_list_columns, NUM_COLUMNS4 );
+							nmh->pitem->iOrder = GetColumnIndexFromVirtualIndex( nmh->iItem, ignore_cid_list_columns, NUM_COLUMNS6 );
 							return TRUE;
 						}
 					}
-
-					return FALSE;
 				}
 				break;
 
@@ -2186,9 +2519,27 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 
 					int index = nmh->iItem;
 
-					if ( hWnd_parent == g_hWnd_call_log )
+					if ( hWnd_parent == g_hWnd_allow_list )
 					{
-						index = GetVirtualIndexFromColumnIndex( index, call_log_columns, NUM_COLUMNS1 );
+						index = GetVirtualIndexFromColumnIndex( index, allow_list_columns, NUM_COLUMNS1 );
+
+						if ( index != -1 )
+						{
+							*allow_list_columns_width[ index ] = nmh->pitem->cxy;
+						}
+					}
+					else if ( hWnd_parent == g_hWnd_allow_cid_list )
+					{
+						index = GetVirtualIndexFromColumnIndex( index, allow_cid_list_columns, NUM_COLUMNS2 );
+
+						if ( index != -1 )
+						{
+							*allow_cid_list_columns_width[ index ] = nmh->pitem->cxy;
+						}
+					}
+					else if ( hWnd_parent == g_hWnd_call_log )
+					{
+						index = GetVirtualIndexFromColumnIndex( index, call_log_columns, NUM_COLUMNS3 );
 
 						if ( index != -1 )
 						{
@@ -2197,7 +2548,7 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 					}
 					else if ( hWnd_parent == g_hWnd_contact_list )
 					{
-						index = GetVirtualIndexFromColumnIndex( index, contact_list_columns, NUM_COLUMNS2 );
+						index = GetVirtualIndexFromColumnIndex( index, contact_list_columns, NUM_COLUMNS4 );
 
 						if ( index != -1 )
 						{
@@ -2206,7 +2557,7 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 					}
 					else if ( hWnd_parent == g_hWnd_ignore_list )
 					{
-						index = GetVirtualIndexFromColumnIndex( index, ignore_list_columns, NUM_COLUMNS3 );
+						index = GetVirtualIndexFromColumnIndex( index, ignore_list_columns, NUM_COLUMNS5 );
 
 						if ( index != -1 )
 						{
@@ -2215,7 +2566,7 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 					}
 					else if ( hWnd_parent == g_hWnd_ignore_cid_list )
 					{
-						index = GetVirtualIndexFromColumnIndex( index, ignore_cid_list_columns, NUM_COLUMNS4 );
+						index = GetVirtualIndexFromColumnIndex( index, ignore_cid_list_columns, NUM_COLUMNS6 );
 
 						if ( index != -1 )
 						{
@@ -2275,7 +2626,7 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 					lvc.mask = LVCF_FMT | LVCF_ORDER;
 					_SendMessageW( nmlv->hdr.hwndFrom, LVM_GETCOLUMN, nmlv->iSubItem, ( LPARAM )&lvc );
 
-					sortinfo si;
+					sort_info si;
 					si.column = lvc.iOrder;
 					si.hWnd = nmlv->hdr.hwndFrom;
 
@@ -2286,8 +2637,6 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 						// Sort down
 						lvc.fmt = lvc.fmt & ( ~HDF_SORTUP ) | HDF_SORTDOWN;
 						_SendMessageW( nmlv->hdr.hwndFrom, LVM_SETCOLUMN, ( WPARAM )nmlv->iSubItem, ( LPARAM )&lvc );
-
-						_SendMessageW( nmlv->hdr.hwndFrom, LVM_SORTITEMS, ( WPARAM )&si, ( LPARAM )( PFNLVCOMPARE )CompareFunc );
 					}
 					else if ( HDF_SORTDOWN & lvc.fmt )	// Column is sorted downward.
 					{
@@ -2296,15 +2645,15 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 						// Sort up
 						lvc.fmt = lvc.fmt & ( ~HDF_SORTDOWN ) | HDF_SORTUP;
 						_SendMessageW( nmlv->hdr.hwndFrom, LVM_SETCOLUMN, nmlv->iSubItem, ( LPARAM )&lvc );
-
-						_SendMessageW( nmlv->hdr.hwndFrom, LVM_SORTITEMS, ( WPARAM )&si, ( LPARAM )( PFNLVCOMPARE )CompareFunc );
 					}
 					else	// Column has no sorting set.
 					{
-						unsigned char column_count = ( nmlv->hdr.hwndFrom == g_hWnd_call_log ? total_columns1 :
-													 ( nmlv->hdr.hwndFrom == g_hWnd_contact_list ? total_columns2 :
-													 ( nmlv->hdr.hwndFrom == g_hWnd_ignore_list ? total_columns3 :
-													 ( nmlv->hdr.hwndFrom == g_hWnd_ignore_cid_list ? total_columns4 : 0 ) ) ) );
+						unsigned char column_count = ( nmlv->hdr.hwndFrom == g_hWnd_allow_list ? g_total_columns1 :
+													 ( nmlv->hdr.hwndFrom == g_hWnd_allow_cid_list ? g_total_columns2 :
+													 ( nmlv->hdr.hwndFrom == g_hWnd_call_log ? g_total_columns3 :
+													 ( nmlv->hdr.hwndFrom == g_hWnd_contact_list ? g_total_columns4 :
+													 ( nmlv->hdr.hwndFrom == g_hWnd_ignore_list ? g_total_columns5 :
+													 ( nmlv->hdr.hwndFrom == g_hWnd_ignore_cid_list ? g_total_columns6 : 0 ) ) ) ) ) );
 
 						// Remove the sort format for all columns.
 						for ( unsigned char i = 0; i < column_count; ++i )
@@ -2324,9 +2673,9 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 						// Sort down to start.
 						lvc.fmt = lvc.fmt | HDF_SORTDOWN;
 						_SendMessageW( nmlv->hdr.hwndFrom, LVM_SETCOLUMN, nmlv->iSubItem, ( LPARAM )&lvc );
-
-						_SendMessageW( nmlv->hdr.hwndFrom, LVM_SORTITEMS, ( WPARAM )&si, ( LPARAM )( PFNLVCOMPARE )CompareFunc );
 					}
+
+					_SendMessageW( nmlv->hdr.hwndFrom, LVM_SORTITEMS, ( WPARAM )&si, ( LPARAM )( PFNLVCOMPARE )CompareFunc );
 				}
 				break;
 
@@ -2335,6 +2684,25 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 					NMITEMACTIVATE *nmitem = ( NMITEMACTIVATE * )lParam;
 
 					HandleRightClick( nmitem->hdr.hwndFrom );
+				}
+				break;
+
+				case NM_DBLCLK:
+				{
+					NMITEMACTIVATE *nmitem = ( NMITEMACTIVATE * )lParam;
+
+					if ( nmitem->hdr.hwndFrom == g_hWnd_contact_list )
+					{
+						_SendMessageW( hWnd, WM_COMMAND, MENU_EDIT_CONTACT, 0 );
+					}
+					else if ( nmitem->hdr.hwndFrom == g_hWnd_allow_list || nmitem->hdr.hwndFrom == g_hWnd_ignore_list )
+					{
+						_SendMessageW( hWnd, WM_COMMAND, MENU_EDIT_ALLOW_IGNORE_LIST, 0 );
+					}
+					else if ( nmitem->hdr.hwndFrom == g_hWnd_allow_cid_list || nmitem->hdr.hwndFrom == g_hWnd_ignore_cid_list )
+					{
+						_SendMessageW( hWnd, WM_COMMAND, MENU_EDIT_ALLOW_IGNORE_CID_LIST, 0 );
+					}
 				}
 				break;
 
@@ -2358,6 +2726,64 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 					if ( !in_worker_thread )
 					{
 						UpdateMenus( ( _SendMessageW( nmlv->hdr.hwndFrom, LVM_GETSELECTEDCOUNT, 0, 0 ) > 0 ? UM_ENABLE : UM_DISABLE ) );
+					}
+				}
+				break;
+
+				case LVN_HOTTRACK:
+				{
+					NMLISTVIEW *nmlv = ( NMLISTVIEW * )lParam;
+
+					if ( nmlv->hdr.hwndFrom == g_hWnd_call_log )
+					{
+						LVHITTESTINFO lvhti;
+						_memzero( &lvhti, sizeof( LVHITTESTINFO ) );
+						lvhti.pt = nmlv->ptAction;
+
+						_SendMessageW( g_hWnd_call_log, LVM_HITTEST, 0, ( LPARAM )&lvhti );
+
+						if ( lvhti.iItem != last_tooltip_item )
+						{
+							// Save the last item that was hovered so we don't have to keep calling everything below.
+							last_tooltip_item = lvhti.iItem;
+
+							TOOLINFO ti;
+							_memzero( &ti, sizeof( TOOLINFO ) );
+							ti.cbSize = sizeof( TOOLINFO );
+							ti.hwnd = g_hWnd_call_log;
+
+							_SendMessageW( g_hWnd_tooltip, TTM_GETTOOLINFO, 0, ( LPARAM )&ti );
+
+							ti.lpszText = NULL;	// If we aren't hovered over an item or the download info is NULL, then we'll end up not showing the tooltip text.
+
+							if ( lvhti.iItem != -1 )
+							{
+								LVITEM lvi;
+								_memzero( &lvi, sizeof( LVITEM ) );
+								lvi.mask = LVIF_PARAM;
+								lvi.iItem = lvhti.iItem;
+
+								_SendMessageW( g_hWnd_call_log, LVM_GETITEM, 0, ( LPARAM )&lvi );
+
+								display_info *di = ( display_info * )lvi.lParam;
+
+								if ( di != NULL )
+								{
+									if ( di->custom_caller_id != NULL )
+									{
+										__snwprintf( tooltip_buffer, 512, L"%s (%s)\r\n%s\r\n%s", di->custom_caller_id, di->caller_id, di->w_phone_number, di->w_time );
+									}
+									else
+									{
+										__snwprintf( tooltip_buffer, 512, L"%s\r\n%s\r\n%s", di->caller_id, di->w_phone_number, di->w_time );
+									}
+
+									ti.lpszText = tooltip_buffer;
+								}
+							}
+
+							_SendMessageW( g_hWnd_tooltip, TTM_UPDATETIPTEXT, 0, ( LPARAM )&ti );
+						}
 					}
 				}
 				break;
@@ -2391,20 +2817,16 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 
 		case WM_PROPAGATE:
 		{
-			if ( LOWORD( wParam ) == CW_MODIFY )
+			if ( LOWORD( wParam ) == CW_MODIFY && lParam != NULL )
 			{
-				displayinfo *di = ( displayinfo * )lParam;	// lParam = our displayinfo structure from the connection thread.
-
-				FormatDisplayInfo( di );
-
 				// Insert a row into our listview.
 				LVITEM lvi;
 				_memzero( &lvi, sizeof( LVITEM ) );
 				lvi.mask = LVIF_PARAM; // Our listview items will display the text contained the lParam value.
-				lvi.iItem = _SendMessageW( g_hWnd_call_log, LVM_GETITEMCOUNT, 0, 0 );
+				lvi.iItem = ( int )_SendMessageW( g_hWnd_call_log, LVM_GETITEMCOUNT, 0, 0 );
 				lvi.iSubItem = 0;
 				lvi.lParam = lParam;
-				int index = _SendMessageW( g_hWnd_call_log, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
+				int index = ( int )_SendMessageW( g_hWnd_call_log, LVM_INSERTITEM, 0, ( LPARAM )&lvi );
 
 				// 0 = show popups, etc. 1 = don't show.
 				if ( HIWORD( wParam ) == 0 )
@@ -2418,10 +2840,16 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 
 					if ( cfg_enable_popups )
 					{
-						CreatePopup( di );
+						CreatePopup( ( display_info * )lParam );
 					}
 				}
 			}
+		}
+		break;
+
+		case WM_ACTIVATE:
+		{
+			_SetFocus( GetCurrentListView() );	// Allows us to scroll the listview.
 		}
 		break;
 
@@ -2442,15 +2870,15 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 		case WM_EXIT:
 		{
 			// Prevent the possibility of running additional processes.
-			if ( g_hWnd_columns != NULL )
-			{
-				_EnableWindow( g_hWnd_columns, FALSE );
-				_ShowWindow( g_hWnd_columns, SW_HIDE );
-			}
 			if ( g_hWnd_options != NULL )
 			{
 				_EnableWindow( g_hWnd_options, FALSE );
 				_ShowWindow( g_hWnd_options, SW_HIDE );
+			}
+			if ( g_hWnd_search != NULL )
+			{
+				_EnableWindow( g_hWnd_search, FALSE );
+				_ShowWindow( g_hWnd_search, SW_HIDE );
 			}
 			if ( g_hWnd_update != NULL )
 			{
@@ -2511,14 +2939,14 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 
 		case WM_DESTROY_ALT:
 		{
-			if ( g_hWnd_columns != NULL )
-			{
-				_DestroyWindow( g_hWnd_columns );
-			}
-
 			if ( g_hWnd_options != NULL )
 			{
 				_DestroyWindow( g_hWnd_options );
+			}
+
+			if ( g_hWnd_search != NULL )
+			{
+				_DestroyWindow( g_hWnd_search );
 			}
 
 			if ( g_hWnd_update != NULL )
@@ -2558,7 +2986,7 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 			}
 
 			// Get the number of items in the listview.
-			int num_items = _SendMessageW( g_hWnd_call_log, LVM_GETITEMCOUNT, 0, 0 );
+			int num_items = ( int )_SendMessageW( g_hWnd_call_log, LVM_GETITEMCOUNT, 0, 0 );
 
 			LVITEM lvi;
 			_memzero( &lvi, sizeof( LVITEM ) );
@@ -2569,7 +2997,7 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 			{
 				_SendMessageW( g_hWnd_call_log, LVM_GETITEM, 0, ( LPARAM )&lvi );
 
-				displayinfo *di = ( displayinfo * )lvi.lParam;
+				display_info *di = ( display_info * )lvi.lParam;
 				if ( di != NULL )
 				{
 					free_displayinfo( &di );
@@ -2579,6 +3007,12 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 			UpdateColumnOrders();
 
 			DestroyMenus();
+
+			if ( tooltip_buffer != NULL )
+			{
+				GlobalFree( tooltip_buffer );
+				tooltip_buffer = NULL;
+			}
 
 			_DestroyWindow( hWnd );
 		}

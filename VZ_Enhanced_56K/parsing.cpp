@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -86,7 +86,7 @@ char *fields_tolower( char *decoded_buffer )
 			str_pos_start[ i ] = ( char )_CharLowerA( ( LPSTR )str_pos_start[ i ] );
 		}*/
 
-		_CharLowerBuffA( str_pos_start, str_pos_end - str_pos_start );
+		_CharLowerBuffA( str_pos_start, ( DWORD )( str_pos_end - str_pos_start ) );
 	}
 
 	return end_of_header;
@@ -114,7 +114,7 @@ bool ParseURL( char *url, char **host, char **resource )
 		return false;
 	}
 
-	int host_length = str_pos_end - str_pos_start;
+	int host_length = ( int )( str_pos_end - str_pos_start );
 
 	// Save the host.
 	*host = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * ( host_length + 1 ) );
@@ -157,7 +157,7 @@ bool ParseRedirect( char *decoded_buffer, char **host, char **resource )
 		*( end_of_header + 2 ) = '\r';	// Restore the end of header.
 		return false;
 	}
-	int host_length = str_pos_end - str_pos_start;
+	int host_length = ( int )( str_pos_end - str_pos_start );
 
 	*host = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * ( host_length + 1 ) );
 	_memcpy_s( *host, host_length + 1, str_pos_start, host_length );
@@ -183,7 +183,7 @@ bool ParseRedirect( char *decoded_buffer, char **host, char **resource )
 		--str_pos_end;
 	}
 
-	int resource_length = str_pos_end - str_pos_start;
+	int resource_length = ( int )( str_pos_end - str_pos_start );
 
 	*resource = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * ( resource_length + 1 ) );
 	_memcpy_s( *resource, resource_length + 1, str_pos_start, resource_length );

@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -38,16 +38,16 @@ LRESULT CALLBACK PopupWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
     {
 		case WM_PROPAGATE:
 		{
-			DoublyLinkedList *ll = ( DoublyLinkedList * )_GetWindowLongW( hWnd, 0 );
+			DoublyLinkedList *ll = ( DoublyLinkedList * )_GetWindowLongPtrW( hWnd, 0 );
 			if ( ll != NULL && ll->data != NULL && ( ( POPUP_SETTINGS * )ll->data )->shared_settings != NULL )
 			{
 				SHARED_SETTINGS *shared_settings = ( ( POPUP_SETTINGS * )ll->data )->shared_settings;
 
-				if ( shared_settings->ringtone_info != NULL && ( shared_settings->ringtone_info->ringtone_path != NULL || shared_settings->ringtone_info->ringtone_path[ 0 ] != NULL ) )
+				if ( shared_settings->rti != NULL && ( shared_settings->rti->ringtone_path != NULL || shared_settings->rti->ringtone_path[ 0 ] != NULL ) )
 				{
 					wchar_t alias[ 11 ];
 					__snwprintf( alias, 11, L"%lu", ( unsigned int )hWnd );
-					HandleRingtone( RINGTONE_PLAY, shared_settings->ringtone_info->ringtone_path, alias );
+					HandleRingtone( RINGTONE_PLAY, shared_settings->rti->ringtone_path, alias );
 				}
 
 				RECT rc;
@@ -118,7 +118,7 @@ LRESULT CALLBACK PopupWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 			_DeleteObject( ohbm );
 			_DeleteObject( hbm );
 
-			DoublyLinkedList *ll = ( DoublyLinkedList * )_GetWindowLongW( hWnd, 0 );
+			DoublyLinkedList *ll = ( DoublyLinkedList * )_GetWindowLongPtrW( hWnd, 0 );
 
 			if ( ll != NULL && ll->data != NULL && ( ( POPUP_SETTINGS * )ll->data )->shared_settings != NULL )
 			{
@@ -183,7 +183,7 @@ LRESULT CALLBACK PopupWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 					POPUP_SETTINGS *p_s = ( POPUP_SETTINGS * )ll->data;
 					ll = ll->next;
 
-					if ( p_s->popup_line_order <= 0 )
+					if ( p_s->popup_info.line_order <= 0 )
 					{
 						continue;
 					}
@@ -227,7 +227,7 @@ LRESULT CALLBACK PopupWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 						rc_line.right = client_rc.right - 5;
 					}
 
-					if ( p_s->font_shadow )
+					if ( p_s->popup_info.font_shadow )
 					{
 						RECT rc_shadow_line = rc_line;
 						rc_shadow_line.left += 2;
@@ -235,16 +235,16 @@ LRESULT CALLBACK PopupWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 						rc_shadow_line.right += 2;
 						rc_shadow_line.bottom += 2;
 
-						_SetTextColor( hdcMem, p_s->font_shadow_color );
+						_SetTextColor( hdcMem, p_s->popup_info.font_shadow_color );
 
-						_DrawTextW( hdcMem, p_s->line_text, -1, &rc_shadow_line, DT_NOPREFIX | ( p_s->popup_justify == 0 ? DT_LEFT : ( p_s->popup_justify == 1 ? DT_CENTER : DT_RIGHT ) ) );
+						_DrawTextW( hdcMem, p_s->line_text, -1, &rc_shadow_line, DT_NOPREFIX | ( p_s->popup_info.justify_line == 0 ? DT_LEFT : ( p_s->popup_info.justify_line == 1 ? DT_CENTER : DT_RIGHT ) ) );
 					}
 
 					_SelectObject( hdcMem, p_s->font );
 
-					_SetTextColor( hdcMem, p_s->font_color );
+					_SetTextColor( hdcMem, p_s->popup_info.font_color );
 
-					_DrawTextW( hdcMem, p_s->line_text, -1, &rc_line, DT_NOPREFIX | ( p_s->popup_justify == 0 ? DT_LEFT : ( p_s->popup_justify == 1 ? DT_CENTER : DT_RIGHT ) ) );
+					_DrawTextW( hdcMem, p_s->line_text, -1, &rc_line, DT_NOPREFIX | ( p_s->popup_info.justify_line == 0 ? DT_LEFT : ( p_s->popup_info.justify_line == 1 ? DT_CENTER : DT_RIGHT ) ) );
 
 					_SelectObject( hdcMem, ohf );	// Reset the old font.
 				}
@@ -262,7 +262,7 @@ LRESULT CALLBACK PopupWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
 		case WM_CAPTURECHANGED:
 		{
-			DoublyLinkedList *ll = ( DoublyLinkedList * )_GetWindowLongW( hWnd, 0 );
+			DoublyLinkedList *ll = ( DoublyLinkedList * )_GetWindowLongPtrW( hWnd, 0 );
 			if ( ll != NULL && ll->data != NULL )
 			{
 				POPUP_SETTINGS *ps = ( POPUP_SETTINGS * )ll->data;
@@ -277,7 +277,7 @@ LRESULT CALLBACK PopupWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		{
 			_SetCapture( hWnd );
 
-			DoublyLinkedList *ll = ( DoublyLinkedList * )_GetWindowLongW( hWnd, 0 );
+			DoublyLinkedList *ll = ( DoublyLinkedList * )_GetWindowLongPtrW( hWnd, 0 );
 			if ( ll != NULL && ll->data != NULL )
 			{
 				POPUP_SETTINGS *ps = ( POPUP_SETTINGS * )ll->data;
@@ -303,7 +303,7 @@ LRESULT CALLBACK PopupWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
 		case WM_MOUSEMOVE:
 		{
-			DoublyLinkedList *ll = ( DoublyLinkedList * )_GetWindowLongW( hWnd, 0 );
+			DoublyLinkedList *ll = ( DoublyLinkedList * )_GetWindowLongPtrW( hWnd, 0 );
 			if ( ll != NULL && ll->data != NULL )
 			{
 				POPUP_SETTINGS *ps = ( POPUP_SETTINGS * )ll->data;
@@ -321,7 +321,7 @@ LRESULT CALLBACK PopupWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
 					// Allow our main window to attach to the desktop edge.
 					_SystemParametersInfoW( SPI_GETWORKAREA, 0, &wa, 0 );			
-					if( is_close( rc.left, wa.left ) )				// Attach to left side of the desktop.
+					if ( is_close( rc.left, wa.left ) )				// Attach to left side of the desktop.
 					{
 						_OffsetRect( &rc, wa.left - rc.left, 0 );
 					}
@@ -330,7 +330,7 @@ LRESULT CALLBACK PopupWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 						_OffsetRect( &rc, wa.right - rc.right, 0 );
 					}
 
-					if( is_close( rc.top, wa.top ) )				// Attach to top of the desktop.
+					if ( is_close( rc.top, wa.top ) )				// Attach to top of the desktop.
 					{
 						_OffsetRect( &rc, 0, wa.top - rc.top );
 					}
@@ -365,7 +365,7 @@ LRESULT CALLBACK PopupWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		case WM_DESTROY:
 		{
 			// We can free the shared memory from the first node.
-			DoublyLinkedList *current_node = ( DoublyLinkedList * )_GetWindowLongW( hWnd, 0 );
+			DoublyLinkedList *current_node = ( DoublyLinkedList * )_GetWindowLongPtrW( hWnd, 0 );
 			if ( current_node != NULL && current_node->data != NULL )
 			{
 				POPUP_SETTINGS *popup_settings = ( POPUP_SETTINGS * )current_node->data;
@@ -376,7 +376,7 @@ LRESULT CALLBACK PopupWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 				{
 					SHARED_SETTINGS *shared_settings = popup_settings->shared_settings;
 
-					if ( shared_settings->ringtone_info != NULL && ( shared_settings->ringtone_info->ringtone_path != NULL || shared_settings->ringtone_info->ringtone_path[ 0 ] != NULL ) )
+					if ( shared_settings->rti != NULL && ( shared_settings->rti->ringtone_path != NULL || shared_settings->rti->ringtone_path[ 0 ] != NULL ) )
 					{
 						wchar_t alias[ 11 ];
 						__snwprintf( alias, 11, L"%lu", ( unsigned int )hWnd );
@@ -388,14 +388,14 @@ LRESULT CALLBACK PopupWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 						_DeleteObject( shared_settings->contact_picture_info.picture );
 					}
 
-					// Don't free contact_picture_info.picture_path if it's from our contactinfo value.
+					// Don't free contact_picture_info.picture_path if it's from our contact_info value.
 					// free_picture_path is set to true by the Preview button in the Options.
 					if ( shared_settings->contact_picture_info.free_picture_path )
 					{
 						GlobalFree( shared_settings->contact_picture_info.picture_path );
 					}
 
-					// Do not free shared_settings->ringtone_info.
+					// Do not free shared_settings->rti.
 					GlobalFree( shared_settings );
 				}
 			}
@@ -410,7 +410,7 @@ LRESULT CALLBACK PopupWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 				if ( popup_settings != NULL )
 				{
 					_DeleteObject( popup_settings->font );
-					GlobalFree( popup_settings->font_face );
+					GlobalFree( popup_settings->popup_info.font_face );
 					GlobalFree( popup_settings->line_text );
 					GlobalFree( popup_settings );
 				}

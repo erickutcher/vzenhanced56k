@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -148,7 +148,10 @@ HBITMAP ImageToBitmap( wchar_t *file_path, unsigned int &height, unsigned int &w
 		}
 
 		#ifndef NTDLL_USE_STATIC_LIB
-
+#ifdef _WIN64
+			width = ( int )( w * scale );
+			height = ( int )( h * scale );
+#else
 			// Seems like a cheap way to get an integer out of a floating point multiplication.
 			w *= scale;
 			h *= scale;
@@ -167,7 +170,7 @@ HBITMAP ImageToBitmap( wchar_t *file_path, unsigned int &height, unsigned int &w
 
 			width = nw;
 			height = nh;
-
+#endif
 		#else
 
 			width = ( int )( w * scale );
@@ -228,7 +231,10 @@ HBITMAP ImageToBitmap( wchar_t *file_path, unsigned int &height, unsigned int &w
 		}
 
 		#ifndef NTDLL_USE_STATIC_LIB
-
+#ifdef _WIN64
+			width = ( int )( w * scale );
+			height = ( int )( h * scale );
+#else
 			// Seems like a cheap way to get an integer out of a floating point multiplication.
 			w *= scale;
 			h *= scale;
@@ -247,7 +253,7 @@ HBITMAP ImageToBitmap( wchar_t *file_path, unsigned int &height, unsigned int &w
 
 			width = nw;
 			height = nh;
-
+#endif
 		#else
 
 			width = ( int )( w * scale );

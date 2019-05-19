@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -22,6 +22,8 @@
 #include "string_tables.h"
 #include "connection.h"
 
+#include "lite_gdi32.h"
+
 #define BTN_0			1000
 #define BTN_1			1001
 #define BTN_2			1002
@@ -36,19 +38,26 @@
 #define BTN_ACTION		1012
 #define EDIT_NUMBER		1013
 
-bool multiple_phone_numbers = false;	// Change the call from phone number if we're adding multiple phone numbers.
+HWND g_hWnd_ignore_phone_number = NULL;
+
+HWND g_hWnd_number = NULL;
+HWND g_hWnd_phone_action = NULL;
+
+allow_ignore_info *edit_aii = NULL;		// Display the Phone Number we want to edit (when editing a Phone Number in the allow/ignore phone number list listview).
+
+unsigned char phone_number_type = LIST_TYPE_ALLOW;
 
 WNDPROC EditProc = NULL;
 
 LRESULT CALLBACK EditSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 {
-	switch( msg )
+	switch ( msg )
 	{
 		case WM_CHAR:
 		{
 			char current_phone_number[ 17 ];
 			_memzero( current_phone_number, 17 );
-			int current_phone_number_length = _SendMessageA( hWnd, WM_GETTEXT, 17, ( LPARAM )current_phone_number );
+			int current_phone_number_length = ( int )_SendMessageA( hWnd, WM_GETTEXT, 17, ( LPARAM )current_phone_number );
 
 			DWORD offset_begin = 0, offset_end = 0;
 			_SendMessageA( hWnd, EM_GETSEL, ( WPARAM )&offset_begin, ( WPARAM )&offset_end );
@@ -62,14 +71,14 @@ LRESULT CALLBACK EditSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 					return 0;
 				}
 
-				_SendMessageW( hWnd, EM_REPLACESEL, FALSE, ( LPARAM )L"*" );
+				_SendMessageA( hWnd, EM_REPLACESEL, FALSE, ( LPARAM )"*" );
 				return 0;
 			}
 			else if ( wParam == '+' )
 			{
 				if ( ( current_phone_number[ 0 ] != '+' && offset_begin == 0 && offset_end == 0 ) || ( offset_begin == 0 && offset_end > 0 ) )
 				{
-					_SendMessageW( hWnd, EM_REPLACESEL, FALSE, ( LPARAM )L"+" );
+					_SendMessageA( hWnd, EM_REPLACESEL, FALSE, ( LPARAM )"+" );
 					return 0;
 				}
 			}
@@ -142,7 +151,7 @@ LRESULT CALLBACK EditSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 					{
 						char current_phone_number[ 17 ];
 						_memzero( current_phone_number, 17 );
-						int current_phone_number_length = _SendMessageA( hWnd, WM_GETTEXT, 17, ( LPARAM )current_phone_number );
+						int current_phone_number_length = ( int )_SendMessageA( hWnd, WM_GETTEXT, 17, ( LPARAM )current_phone_number );
 
 						DWORD offset_begin = 0, offset_end = 0;
 						_SendMessageA( hWnd, EM_GETSEL, ( WPARAM )&offset_begin, ( LPARAM )&offset_end );
@@ -152,7 +161,6 @@ LRESULT CALLBACK EditSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 																   ( phone_number[ 0 ] == '+' && offset_begin == 0 ) ) )
 						{
 							_SendMessageA( hWnd, EM_REPLACESEL, FALSE, ( LPARAM )phone_number );
-							
 						}
 
 						return 0;
@@ -179,26 +187,26 @@ LRESULT CALLBACK PhoneWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 			// 0 = default, 1 = allow wildcards
 			CHAR enable_items = ( CHAR )( ( CREATESTRUCT * )lParam )->lpCreateParams;
 
-			HWND hWnd_static = _CreateWindowW( WC_STATIC, NULL, SS_GRAYFRAME | WS_CHILD | WS_VISIBLE, 10, 10, rc.right - 20, rc.bottom - 50, hWnd, NULL, NULL, NULL );
+			//HWND hWnd_static = _CreateWindowW( WC_STATIC, NULL, SS_GRAYFRAME | WS_CHILD | WS_VISIBLE, 10, 10, rc.right - 20, rc.bottom - 50, hWnd, NULL, NULL, NULL );
 
 			HWND g_hWnd_phone_static1 = _CreateWindowW( WC_STATIC, ST_Phone_Number_, WS_CHILD | WS_VISIBLE, 20, 20, ( rc.right - rc.left ) - 40, 15, hWnd, NULL, NULL, NULL );
-			HWND g_hWnd_number = _CreateWindowExW( WS_EX_CLIENTEDGE, WC_EDIT, NULL, ES_AUTOHSCROLL | ES_CENTER | ES_NOHIDESEL | ES_NUMBER | WS_CHILD | WS_TABSTOP | WS_VISIBLE, 20, 35, ( rc.right - rc.left ) - 40, 20, hWnd, ( HMENU )EDIT_NUMBER, NULL, NULL );
+			g_hWnd_number = _CreateWindowExW( WS_EX_CLIENTEDGE, WC_EDIT, NULL, ES_AUTOHSCROLL | ES_CENTER | ES_NOHIDESEL | ES_NUMBER | WS_CHILD | WS_TABSTOP | WS_VISIBLE, 20, 35, ( rc.right - rc.left ) - 40, 23, hWnd, ( HMENU )EDIT_NUMBER, NULL, NULL );
 
-			HWND g_hWnd_1 = _CreateWindowW( WC_BUTTON, L"1", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 20, 65, 50, 25, hWnd, ( HMENU )BTN_1, NULL, NULL );
-			HWND g_hWnd_2 = _CreateWindowW( WC_BUTTON, L"2 ABC", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 75, 65, 50, 25, hWnd, ( HMENU )BTN_2, NULL, NULL );
-			HWND g_hWnd_3 = _CreateWindowW( WC_BUTTON, L"3 DEF", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 130, 65, 50, 25, hWnd, ( HMENU )BTN_3, NULL, NULL );
+			HWND g_hWnd_1 = _CreateWindowW( WC_BUTTON, L"1", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 20, 68, 50, 25, hWnd, ( HMENU )BTN_1, NULL, NULL );
+			HWND g_hWnd_2 = _CreateWindowW( WC_BUTTON, L"2 ABC", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 75, 68, 50, 25, hWnd, ( HMENU )BTN_2, NULL, NULL );
+			HWND g_hWnd_3 = _CreateWindowW( WC_BUTTON, L"3 DEF", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 130, 68, 50, 25, hWnd, ( HMENU )BTN_3, NULL, NULL );
 
-			HWND g_hWnd_4 = _CreateWindowW( WC_BUTTON, L"4 GHI", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 20, 95, 50, 25, hWnd, ( HMENU )BTN_4, NULL, NULL );
-			HWND g_hWnd_5 = _CreateWindowW( WC_BUTTON, L"5 JKL", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 75, 95, 50, 25, hWnd, ( HMENU )BTN_5, NULL, NULL );
-			HWND g_hWnd_6 = _CreateWindowW( WC_BUTTON, L"6 MNO", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 130, 95, 50, 25, hWnd, ( HMENU )BTN_6, NULL, NULL );
+			HWND g_hWnd_4 = _CreateWindowW( WC_BUTTON, L"4 GHI", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 20, 98, 50, 25, hWnd, ( HMENU )BTN_4, NULL, NULL );
+			HWND g_hWnd_5 = _CreateWindowW( WC_BUTTON, L"5 JKL", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 75, 98, 50, 25, hWnd, ( HMENU )BTN_5, NULL, NULL );
+			HWND g_hWnd_6 = _CreateWindowW( WC_BUTTON, L"6 MNO", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 130, 98, 50, 25, hWnd, ( HMENU )BTN_6, NULL, NULL );
 
-			HWND g_hWnd_7 = _CreateWindowW( WC_BUTTON, L"7 PQRS", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 20, 125, 50, 25, hWnd, ( HMENU )BTN_7, NULL, NULL );
-			HWND g_hWnd_8 = _CreateWindowW( WC_BUTTON, L"8 TUV", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 75, 125, 50, 25, hWnd, ( HMENU )BTN_8, NULL, NULL );
-			HWND g_hWnd_9 = _CreateWindowW( WC_BUTTON, L"9 WXYZ", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 130, 125, 50, 25, hWnd, ( HMENU )BTN_9, NULL, NULL );
+			HWND g_hWnd_7 = _CreateWindowW( WC_BUTTON, L"7 PQRS", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 20, 128, 50, 25, hWnd, ( HMENU )BTN_7, NULL, NULL );
+			HWND g_hWnd_8 = _CreateWindowW( WC_BUTTON, L"8 TUV", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 75, 128, 50, 25, hWnd, ( HMENU )BTN_8, NULL, NULL );
+			HWND g_hWnd_9 = _CreateWindowW( WC_BUTTON, L"9 WXYZ", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 130, 128, 50, 25, hWnd, ( HMENU )BTN_9, NULL, NULL );
 
-			HWND g_hWnd_0 = _CreateWindowW( WC_BUTTON, L"0", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 75, 155, 50, 25, hWnd, ( HMENU )BTN_0, NULL, NULL );
+			HWND g_hWnd_0 = _CreateWindowW( WC_BUTTON, L"0", WS_CHILD | WS_TABSTOP | WS_VISIBLE, 75, 158, 50, 25, hWnd, ( HMENU )BTN_0, NULL, NULL );
 
-			HWND g_hWnd_phone_action = _CreateWindowW( WC_BUTTON, ST_Ignore_Phone_Number, WS_CHILD | WS_TABSTOP | WS_VISIBLE, ( rc.right - rc.left - ( _GetSystemMetrics( SM_CXMINTRACK ) - ( 2 * _GetSystemMetrics( SM_CXSIZEFRAME ) ) ) - 40 ) / 2, rc.bottom - 32, ( _GetSystemMetrics( SM_CXMINTRACK ) - ( 2 * _GetSystemMetrics( SM_CXSIZEFRAME ) ) ) + 40, 23, hWnd, ( HMENU )BTN_ACTION, NULL, NULL );
+			g_hWnd_phone_action = _CreateWindowW( WC_BUTTON, ST_Ignore_Phone_Number, WS_CHILD | WS_TABSTOP | WS_VISIBLE, ( rc.right - rc.left - ( _GetSystemMetrics( SM_CXMINTRACK ) - ( 2 * _GetSystemMetrics( SM_CXSIZEFRAME ) ) ) - 40 ) / 2, rc.bottom - 32, ( _GetSystemMetrics( SM_CXMINTRACK ) - ( 2 * _GetSystemMetrics( SM_CXSIZEFRAME ) ) ) + 40, 23, hWnd, ( HMENU )BTN_ACTION, NULL, NULL );
 
 			_SendMessageW( g_hWnd_number, EM_LIMITTEXT, ( enable_items != 0 ? 16 : 15 ), 0 );
 
@@ -225,8 +233,8 @@ LRESULT CALLBACK PhoneWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
 			if ( enable_items != 0 )
 			{
-				EditProc = ( WNDPROC )_GetWindowLongW( g_hWnd_number, GWL_WNDPROC );
-				_SetWindowLongW( g_hWnd_number, GWL_WNDPROC, ( LONG )EditSubProc );
+				EditProc = ( WNDPROC )_GetWindowLongPtrW( g_hWnd_number, GWLP_WNDPROC );
+				_SetWindowLongPtrW( g_hWnd_number, GWLP_WNDPROC, ( LONG_PTR )EditSubProc );
 			}
 
 			return 0;
@@ -239,90 +247,94 @@ LRESULT CALLBACK PhoneWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		}
 		break;
 
+		case WM_PAINT:
+		{
+			PAINTSTRUCT ps;
+			HDC hDC = _BeginPaint( hWnd, &ps );
+
+			RECT client_rc, frame_rc;
+			_GetClientRect( hWnd, &client_rc );
+
+			// Create a memory buffer to draw to.
+			HDC hdcMem = _CreateCompatibleDC( hDC );
+
+			HBITMAP hbm = _CreateCompatibleBitmap( hDC, client_rc.right - client_rc.left, client_rc.bottom - client_rc.top );
+			HBITMAP ohbm = ( HBITMAP )_SelectObject( hdcMem, hbm );
+			_DeleteObject( ohbm );
+			_DeleteObject( hbm );
+
+			// Fill the background.
+			HBRUSH color = _CreateSolidBrush( ( COLORREF )_GetSysColor( COLOR_3DFACE ) );
+			_FillRect( hdcMem, &client_rc, color );
+			_DeleteObject( color );
+
+			frame_rc = client_rc;
+			frame_rc.left += 10;
+			frame_rc.right -= 10;
+			frame_rc.top += 10;
+			frame_rc.bottom -= 40;
+
+			// Fill the frame.
+			color = _CreateSolidBrush( ( COLORREF )_GetSysColor( COLOR_WINDOW ) );
+			_FillRect( hdcMem, &frame_rc, color );
+			_DeleteObject( color );
+
+			// Draw the frame's border.
+			_DrawEdge( hdcMem, &frame_rc, EDGE_ETCHED, BF_RECT );
+
+			// Draw our memory buffer to the main device context.
+			_BitBlt( hDC, client_rc.left, client_rc.top, client_rc.right, client_rc.bottom, hdcMem, 0, 0, SRCCOPY );
+
+			_DeleteDC( hdcMem );
+			_EndPaint( hWnd, &ps );
+
+			return 0;
+		}
+		break;
+
 		case WM_COMMAND:
 		{
-			switch( LOWORD( wParam ) )
+			switch ( LOWORD( wParam ) )
 			{
 				case BTN_ACTION:
 				{
-					char number[ 17 ];
-					int length =  0;
-					
-					if ( !multiple_phone_numbers )
+					int length = ( int )_SendMessageW( g_hWnd_number, WM_GETTEXTLENGTH, 0, 0 );
+					if ( length <= 0 )
 					{
-						length = _SendMessageA( _GetDlgItem( hWnd, EDIT_NUMBER ), WM_GETTEXT, 17, ( LPARAM )number );
-
-						/*if ( length > 0 )
-						{
-							if ( length == 10 || ( length == 11 && number[ 0 ] == '1' ) )
-							{
-								char value[ 3 ];
-								if ( length == 10 )
-								{
-									value[ 0 ] = number[ 0 ];
-									value[ 1 ] = number[ 1 ];
-									value[ 2 ] = number[ 2 ];
-								}
-								else
-								{
-									value[ 0 ] = number[ 1 ];
-									value[ 1 ] = number[ 2 ];
-									value[ 2 ] = number[ 3 ];
-								}
-
-								unsigned short area_code = ( unsigned short )_strtoul( value, NULL, 10 );
-
-								for ( int i = 0; i < 29; ++i )
-								{
-									if ( area_code == bad_area_codes[ i ] )
-									{
-										_MessageBoxW( hWnd, ST_restricted_area_code, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONWARNING );
-										_SetFocus( _GetDlgItem( hWnd, EDIT_NUMBER ) );
-										return 0;
-									}
-								}
-							}
-						}
-						else*/
-						if ( length <= 0 )
-						{
-							_MessageBoxW( hWnd, ST_enter_valid_phone_number, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONWARNING );
-							_SetFocus( _GetDlgItem( hWnd, EDIT_NUMBER ) );
-							break;
-						}
+						_MessageBoxW( hWnd, ST_enter_valid_phone_number, PROGRAM_CAPTION, MB_APPLMODAL | MB_ICONWARNING );
+						_SetFocus( g_hWnd_number );
 					}
 					else
 					{
-						number[ 0 ] = 0;
-					}
+						allow_ignore_update_info *aiui = ( allow_ignore_update_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_update_info ) );
+						aiui->action = 0;	// Add = 0, 1 = Remove, 2 = Add all tree items, 3 = Update
+						aiui->list_type = phone_number_type;
+						aiui->hWnd = ( phone_number_type == LIST_TYPE_ALLOW ? g_hWnd_allow_list : g_hWnd_ignore_list );
 
-					if ( hWnd == g_hWnd_ignore_phone_number )
-					{
-						ignoreupdateinfo *iui = ( ignoreupdateinfo * )GlobalAlloc( GMEM_FIXED, sizeof( ignoreupdateinfo ) );
-						iui->ii = NULL;
-						iui->action = 0;	// Add = 0, 1 = Remove
-						iui->hWnd = g_hWnd_ignore_list;
+						aiui->phone_number = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * ( length + 1 ) );
+						_SendMessageW( g_hWnd_number, WM_GETTEXT, length + 1, ( LPARAM )aiui->phone_number );
 
-						char *ignore_number = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * ( length + 1 ) );
-						_memcpy_s( ignore_number, length + 1, number, length );
-						ignore_number[ length ] = 0;	// Sanity
+						if ( edit_aii != NULL )
+						{
+							aiui->aii = edit_aii;
 
-						iui->phone_number = ignore_number;
+							aiui->action = 3;	// Update entry.
+						}
 
-						// Add items. iui is freed in the update_ignore_list thread.
-						HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_ignore_list, ( void * )iui, 0, NULL );
+						// Add items. aiui is freed in the update_allow_ignore_list thread.
+						HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_list, ( void * )aiui, 0, NULL );
 						if ( thread != NULL )
 						{
 							CloseHandle( thread );
 						}
 						else
 						{
-							GlobalFree( iui->phone_number );
-							GlobalFree( iui );
+							GlobalFree( aiui->phone_number );
+							GlobalFree( aiui );
 						}
-					}
 
-					_SendMessageW( hWnd, WM_CLOSE, 0, 0 );
+						_SendMessageW( hWnd, WM_CLOSE, 0, 0 );
+					}
 				}
 				break;
 
@@ -330,70 +342,21 @@ LRESULT CALLBACK PhoneWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 				{
 					if ( HIWORD( wParam ) == EN_SETFOCUS )
 					{
-						_PostMessageW( _GetDlgItem( hWnd, EDIT_NUMBER ), EM_SETSEL, 0, -1 );
+						_PostMessageW( g_hWnd_number, EM_SETSEL, 0, -1 );
 					}
 				}
 				break;
 
-				case BTN_1:
-				{
-					_SendMessageW( _GetDlgItem( hWnd, EDIT_NUMBER ), EM_REPLACESEL, FALSE, ( LPARAM )L"1" );
-				}
-				break;
-
-				case BTN_2:
-				{
-					_SendMessageW( _GetDlgItem( hWnd, EDIT_NUMBER ), EM_REPLACESEL, FALSE, ( LPARAM )L"2" );
-				}
-				break;
-
-				case BTN_3:
-				{
-					_SendMessageW( _GetDlgItem( hWnd, EDIT_NUMBER ), EM_REPLACESEL, FALSE, ( LPARAM )L"3" );
-				}
-				break;
-
-				case BTN_4:
-				{
-					_SendMessageW( _GetDlgItem( hWnd, EDIT_NUMBER ), EM_REPLACESEL, FALSE, ( LPARAM )L"4" );
-				}
-				break;
-
-				case BTN_5:
-				{
-					_SendMessageW( _GetDlgItem( hWnd, EDIT_NUMBER ), EM_REPLACESEL, FALSE, ( LPARAM )L"5" );
-				}
-				break;
-
-				case BTN_6:
-				{
-					_SendMessageW( _GetDlgItem( hWnd, EDIT_NUMBER ), EM_REPLACESEL, FALSE, ( LPARAM )L"6" );
-				}
-				break;
-
-				case BTN_7:
-				{
-					_SendMessageW( _GetDlgItem( hWnd, EDIT_NUMBER ), EM_REPLACESEL, FALSE, ( LPARAM )L"7" );
-				}
-				break;
-
-				case BTN_8:
-				{
-					_SendMessageW( _GetDlgItem( hWnd, EDIT_NUMBER ), EM_REPLACESEL, FALSE, ( LPARAM )L"8" );
-				}
-				break;
-
-				case BTN_9:
-				{
-					_SendMessageW( _GetDlgItem( hWnd, EDIT_NUMBER ), EM_REPLACESEL, FALSE, ( LPARAM )L"9" );
-				}
-				break;
-
-				case BTN_0:
-				{
-					_SendMessageW( _GetDlgItem( hWnd, EDIT_NUMBER ), EM_REPLACESEL, FALSE, ( LPARAM )L"0" );
-				}
-				break;
+				case BTN_1: { _SendMessageW( g_hWnd_number, EM_REPLACESEL, FALSE, ( LPARAM )L"1" ); } break;
+				case BTN_2: { _SendMessageW( g_hWnd_number, EM_REPLACESEL, FALSE, ( LPARAM )L"2" ); } break;
+				case BTN_3: { _SendMessageW( g_hWnd_number, EM_REPLACESEL, FALSE, ( LPARAM )L"3" ); } break;
+				case BTN_4: { _SendMessageW( g_hWnd_number, EM_REPLACESEL, FALSE, ( LPARAM )L"4" ); } break;
+				case BTN_5: { _SendMessageW( g_hWnd_number, EM_REPLACESEL, FALSE, ( LPARAM )L"5" ); } break;
+				case BTN_6: { _SendMessageW( g_hWnd_number, EM_REPLACESEL, FALSE, ( LPARAM )L"6" ); } break;
+				case BTN_7: { _SendMessageW( g_hWnd_number, EM_REPLACESEL, FALSE, ( LPARAM )L"7" ); } break;
+				case BTN_8: { _SendMessageW( g_hWnd_number, EM_REPLACESEL, FALSE, ( LPARAM )L"8" ); } break;
+				case BTN_9: { _SendMessageW( g_hWnd_number, EM_REPLACESEL, FALSE, ( LPARAM )L"9" ); } break;
+				case BTN_0: { _SendMessageW( g_hWnd_number, EM_REPLACESEL, FALSE, ( LPARAM )L"0" ); } break;
 			}
 
 			return 0;
@@ -402,8 +365,47 @@ LRESULT CALLBACK PhoneWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
 		case WM_PROPAGATE:
 		{
-			_SendMessageW( _GetDlgItem( hWnd, EDIT_NUMBER ), WM_SETTEXT, 0, 0 );
-			_SetFocus( _GetDlgItem( hWnd, EDIT_NUMBER ) );
+			phone_number_type = ( ( wParam & 0x04 ) ? LIST_TYPE_ALLOW : LIST_TYPE_IGNORE );
+
+			if ( wParam & 0x01 )	// Ignore Phone Number.
+			{
+				edit_aii = NULL;
+
+				if ( phone_number_type == LIST_TYPE_ALLOW )
+				{
+					_SendMessageW( hWnd, WM_SETTEXT, 0, ( LPARAM )ST_Allow_Phone_Number );
+					_SendMessageW( g_hWnd_phone_action, WM_SETTEXT, 0, ( LPARAM )ST_Allow_Phone_Number );
+				}
+				else
+				{
+					_SendMessageW( hWnd, WM_SETTEXT, 0, ( LPARAM )ST_Ignore_Phone_Number );
+					_SendMessageW( g_hWnd_phone_action, WM_SETTEXT, 0, ( LPARAM )ST_Ignore_Phone_Number );
+				}
+
+				_SendMessageW( g_hWnd_number, WM_SETTEXT, 0, 0 );
+			}
+			else if ( wParam & 0x02 )	// Edit Phone Number.
+			{
+				edit_aii = ( allow_ignore_info * )lParam;
+
+				if ( edit_aii != NULL )
+				{
+					if ( phone_number_type == LIST_TYPE_ALLOW )
+					{
+						_SendMessageW( hWnd, WM_SETTEXT, 0, ( LPARAM )ST_Allow_Phone_Number );
+					}
+					else
+					{
+						_SendMessageW( hWnd, WM_SETTEXT, 0, ( LPARAM )ST_Ignore_Phone_Number );
+					}
+
+					_SendMessageW( g_hWnd_phone_action, WM_SETTEXT, 0, ( LPARAM )ST_Update_Phone_Number );
+
+					_SendMessageW( g_hWnd_number, WM_SETTEXT, 0, ( LPARAM )edit_aii->phone_number );
+				}
+			}
+
+			_SetFocus( g_hWnd_number );
 
 			_ShowWindow( hWnd, SW_SHOWNORMAL );
 		}
@@ -428,10 +430,9 @@ LRESULT CALLBACK PhoneWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
 		case WM_DESTROY:
 		{
-			if ( hWnd == g_hWnd_ignore_phone_number )
-			{
-				g_hWnd_ignore_phone_number = NULL;
-			}
+			edit_aii = NULL;
+
+			g_hWnd_ignore_phone_number = NULL;
 
 			return 0;
 		}

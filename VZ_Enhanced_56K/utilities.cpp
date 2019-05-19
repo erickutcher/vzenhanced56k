@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -23,6 +23,7 @@
 #include "menus.h"
 #include "string_tables.h"
 #include "lite_gdi32.h"
+#include "lite_pcre2.h"
 
 #define CID_LIST_COUNT	6
 
@@ -61,8 +62,8 @@ bool cfg_check_for_updates = false;
 bool cfg_enable_popups = false;
 bool cfg_popup_hide_border = false;
 bool cfg_popup_show_contact_picture = false;
-int cfg_popup_width = MIN_WIDTH / 2;
-int cfg_popup_height = MIN_HEIGHT / 3;
+int cfg_popup_width = 240;
+int cfg_popup_height = 106;
 unsigned char cfg_popup_position = 3;		// 0 = Top Left, 1 = Top Right, 2 = Bottom Left, 3 = Bottom Right
 
 unsigned short cfg_popup_time = 10;			// Time in seconds.
@@ -73,126 +74,133 @@ bool cfg_popup_gradient = false;
 unsigned char cfg_popup_gradient_direction = 0;	// 0 = Vertical, 1 = Horizontal
 COLORREF cfg_popup_background_color2 = RGB( 255, 255, 255 );
 
-wchar_t *cfg_popup_font_face1 = NULL;
-wchar_t *cfg_popup_font_face2 = NULL;
-wchar_t *cfg_popup_font_face3 = NULL;
-COLORREF cfg_popup_font_color1 = RGB( 0, 0, 0 );
-COLORREF cfg_popup_font_color2 = RGB( 0, 0, 0 );
-COLORREF cfg_popup_font_color3 = RGB( 0, 0, 0 );
-LONG cfg_popup_font_height1 = 16;
-LONG cfg_popup_font_height2 = 16;
-LONG cfg_popup_font_height3 = 16;
-LONG cfg_popup_font_weight1 = FW_NORMAL;
-LONG cfg_popup_font_weight2 = FW_NORMAL;
-LONG cfg_popup_font_weight3 = FW_NORMAL;
-BYTE cfg_popup_font_italic1 = FALSE;
-BYTE cfg_popup_font_italic2 = FALSE;
-BYTE cfg_popup_font_italic3 = FALSE;
-BYTE cfg_popup_font_underline1 = FALSE;
-BYTE cfg_popup_font_underline2 = FALSE;
-BYTE cfg_popup_font_underline3 = FALSE;
-BYTE cfg_popup_font_strikeout1 = FALSE;
-BYTE cfg_popup_font_strikeout2 = FALSE;
-BYTE cfg_popup_font_strikeout3 = FALSE;
-bool cfg_popup_font_shadow1 = false;
-bool cfg_popup_font_shadow2 = false;
-bool cfg_popup_font_shadow3 = false;
-COLORREF cfg_popup_font_shadow_color1 = RGB( 0, 0, 0 );
-COLORREF cfg_popup_font_shadow_color2 = RGB( 0, 0, 0 );
-COLORREF cfg_popup_font_shadow_color3 = RGB( 0, 0, 0 );
-unsigned char cfg_popup_justify_line1 = 2;	// 0 = Left, 1 = Center, 2 = Right
-unsigned char cfg_popup_justify_line2 = 0;	// 0 = Left, 1 = Center, 2 = Right
-unsigned char cfg_popup_justify_line3 = 0;	// 0 = Left, 1 = Center, 2 = Right
-char cfg_popup_line_order1 = LINE_TIME;
-char cfg_popup_line_order2 = LINE_CALLER_ID;
-char cfg_popup_line_order3 = LINE_PHONE;
 unsigned char cfg_popup_time_format = 0;	// 0 = 12 hour, 1 = 24 hour
 
 bool cfg_popup_enable_ringtones = false;
 wchar_t *cfg_popup_ringtone = NULL;
 
-char cfg_tab_order1 = 0;		// 0 Call Log
-char cfg_tab_order2 = 1;		// 1 Contact List
-char cfg_tab_order3 = 2;		// 2 Ignore List
+POPUP_INFO cfg_popup_info1 = { NULL, RGB( 0x00, 0x00, 0x00 ), RGB( 0x00, 0x00, 0x00 ), 16, FW_NORMAL, FALSE, FALSE, FALSE, 2, LINE_TIME, false };
+POPUP_INFO cfg_popup_info2 = { NULL, RGB( 0x00, 0x00, 0x00 ), RGB( 0x00, 0x00, 0x00 ), 16, FW_NORMAL, FALSE, FALSE, FALSE, 0, LINE_CALLER_ID, false };
+POPUP_INFO cfg_popup_info3 = { NULL, RGB( 0x00, 0x00, 0x00 ), RGB( 0x00, 0x00, 0x00 ), 16, FW_NORMAL, FALSE, FALSE, FALSE, 0, LINE_PHONE, false };
 
-int cfg_column_width1 = 35;
-int cfg_column_width2 = 100;
-int cfg_column_width3 = 205;
-int cfg_column_width4 = 130;
-int cfg_column_width5 = 130;
-int cfg_column_width6 = 100;
+char cfg_tab_order1 = 2;		// 0 Allow List
+char cfg_tab_order2 = 0;		// 1 Call Log
+char cfg_tab_order3 = 1;		// 2 Contact List
+char cfg_tab_order4 = 3;		// 3 Ignore List
 
-// Column / Virtual position
-char cfg_column_order1 = 0;		// 0 # (always 0)
-char cfg_column_order2 = 1;		// 1 Caller ID
-char cfg_column_order3 = 3;		// 2 Date and Time
-char cfg_column_order4 = -1;	// 3 Ignored Caller ID
-char cfg_column_order5 = -1;	// 4 Ignored Phone Number
-char cfg_column_order6 = 2;		// 5 Phone Number
+// Allow
+int cfg_column_al_width1 = 35;
+int cfg_column_al_width2 = 215;
+int cfg_column_al_width3 = 120;
+int cfg_column_al_width4 = 70;
 
-int cfg_column2_width1 = 35;
-int cfg_column2_width2 = 120;
-int cfg_column2_width3 = 100;
-int cfg_column2_width4 = 100;
-int cfg_column2_width5 = 150;
-int cfg_column2_width6 = 120;
-int cfg_column2_width7 = 100;
-int cfg_column2_width8 = 120;
-int cfg_column2_width9 = 100;
-int cfg_column2_width10 = 100;
-int cfg_column2_width11 = 100;
-int cfg_column2_width12 = 120;
-int cfg_column2_width13 = 120;
-int cfg_column2_width14 = 100;
-int cfg_column2_width15 = 70;
-int cfg_column2_width16 = 300;
-int cfg_column2_width17 = 120;
+// Column (1-6) / Virtual position (0-5)
+// Set the visible column to the position indicated in the virtual list.
+char cfg_column_al_order1 = 0;	// 0 # (always 0)
+char cfg_column_al_order2 = 2;	// 1 Last Called
+char cfg_column_al_order3 = 3;	// 2 Phone Number
+char cfg_column_al_order4 = 1;	// 3 Total Calls
 
-char cfg_column2_order1 = 0;	// 0 # (always 0)
-char cfg_column2_order2 = 14;	// 1 Cell Phone
-char cfg_column2_order3 = 6;	// 2 Company
-char cfg_column2_order4 = 9;	// 3 Department
-char cfg_column2_order5 = 10;	// 4 Email Address
-char cfg_column2_order6 = 7;	// 5 Fax Number
-char cfg_column2_order7 = 1;	// 6 First Name
-char cfg_column2_order8 = 13;	// 7 Home Phone
-char cfg_column2_order9 = 8;	// 8 Job Title
-char cfg_column2_order10 = 2;	// 9 Last Name
-char cfg_column2_order11 = 16;	// 10 Nickname
-char cfg_column2_order12 = 3;	// 11 Office Phone
-char cfg_column2_order13 = 11;	// 12 Other Phone
-char cfg_column2_order14 = 12;	// 13 Profession
-char cfg_column2_order15 = 5;	// 14 Title
-char cfg_column2_order16 = 4;	// 15 Web Page
-char cfg_column2_order17 = 15;	// 16 Work Phone
+// Allow CID
+int cfg_column_acidl_width1 = 35;
+int cfg_column_acidl_width2 = 120;
+int cfg_column_acidl_width3 = 215;
+int cfg_column_acidl_width4 = 75;
+int cfg_column_acidl_width5 = 110;
+int cfg_column_acidl_width6 = 110;
+int cfg_column_acidl_width7 = 70;
 
-int cfg_column3_width1 = 35;
-int cfg_column3_width2 = 100;
-int cfg_column3_width3 = 70;
+char cfg_column_acidl_order1 = 0;	// 0 # (always 0)
+char cfg_column_acidl_order2 = 1;	// 1 Caller ID
+char cfg_column_acidl_order3 = 3;	// 2 Last Called
+char cfg_column_acidl_order4 = 4;	// 3 Match Case
+char cfg_column_acidl_order5 = 5;	// 4 Match Whole Word
+char cfg_column_acidl_order6 = 6;	// 5 Regular Expression
+char cfg_column_acidl_order7 = 2;	// 6 Total Calls
 
-char cfg_column3_order1 = 0;	// 0 # (always 0)
-char cfg_column3_order2 = 1;	// 1 Phone Number
-char cfg_column3_order3 = 2;	// 2 Total Calls
+// Call Log
+int cfg_column_cll_width1 = 35;
+int cfg_column_cll_width2 = 130;
+int cfg_column_cll_width3 = 130;
+int cfg_column_cll_width4 = 120;
+int cfg_column_cll_width5 = 215;
+int cfg_column_cll_width6 = 130;
+int cfg_column_cll_width7 = 130;
+int cfg_column_cll_width8 = 120;
 
-int cfg_column4_width1 = 35;
-int cfg_column4_width2 = 100;
-int cfg_column4_width3 = 75;
-int cfg_column4_width4 = 110;
-int cfg_column4_width5 = 70;
+char cfg_column_cll_order1 = 0;		// 0 # (always 0)
+char cfg_column_cll_order2 = -1;	// 1 Allowed Caller ID
+char cfg_column_cll_order3 = -1;	// 2 Allowed Phone Number
+char cfg_column_cll_order4 = 1;		// 3 Caller ID
+char cfg_column_cll_order5 = 3;		// 4 Date and Time
+char cfg_column_cll_order6 = -1;	// 5 Ignored Caller ID
+char cfg_column_cll_order7 = -1;	// 6 Ignored Phone Number
+char cfg_column_cll_order8 = 2;		// 7 Phone Number
 
-char cfg_column4_order1 = 0;	// 0 # (always 0)
-char cfg_column4_order2 = 1;	// 1 Caller ID
-char cfg_column4_order3 = 2;	// 2 Match Case
-char cfg_column4_order4 = 3;	// 3 Match Whole Word
-char cfg_column4_order5 = 4;	// 4 Total Calls
+// Contact
+int cfg_column_cl_width1 = 35;
+int cfg_column_cl_width2 = 120;
+int cfg_column_cl_width3 = 100;
+int cfg_column_cl_width4 = 100;
+int cfg_column_cl_width5 = 150;
+int cfg_column_cl_width6 = 120;
+int cfg_column_cl_width7 = 100;
+int cfg_column_cl_width8 = 120;
+int cfg_column_cl_width9 = 100;
+int cfg_column_cl_width10 = 100;
+int cfg_column_cl_width11 = 100;
+int cfg_column_cl_width12 = 120;
+int cfg_column_cl_width13 = 120;
+int cfg_column_cl_width14 = 100;
+int cfg_column_cl_width15 = 70;
+int cfg_column_cl_width16 = 300;
+int cfg_column_cl_width17 = 120;
 
-bool cfg_connection_auto_login = false;
-bool cfg_connection_reconnect = true;
-unsigned char cfg_connection_retries = 3;
+char cfg_column_cl_order1 = 0;		// 0 # (always 0)
+char cfg_column_cl_order2 = 14;		// 1 Cell Phone
+char cfg_column_cl_order3 = 6;		// 2 Company
+char cfg_column_cl_order4 = 9;		// 3 Department
+char cfg_column_cl_order5 = 10;		// 4 Email Address
+char cfg_column_cl_order6 = 7;		// 5 Fax Number
+char cfg_column_cl_order7 = 1;		// 6 First Name
+char cfg_column_cl_order8 = 13;		// 7 Home Phone
+char cfg_column_cl_order9 = 8;		// 8 Job Title
+char cfg_column_cl_order10 = 2;		// 9 Last Name
+char cfg_column_cl_order11 = 16;	// 10 Nickname
+char cfg_column_cl_order12 = 3;		// 11 Office Phone
+char cfg_column_cl_order13 = 11;	// 12 Other Phone
+char cfg_column_cl_order14 = 12;	// 13 Profession
+char cfg_column_cl_order15 = 5;		// 14 Title
+char cfg_column_cl_order16 = 4;		// 15 Web Page
+char cfg_column_cl_order17 = 15;	// 16 Work Phone
 
-unsigned short cfg_connection_timeout = 60;	// Seconds.
+// Ignore
+int cfg_column_il_width1 = 35;
+int cfg_column_il_width2 = 215;
+int cfg_column_il_width3 = 120;
+int cfg_column_il_width4 = 70;
 
-unsigned char cfg_connection_ssl_version = 4;	// TLS 1.2
+char cfg_column_il_order1 = 0;	// 0 # (always 0)
+char cfg_column_il_order2 = 2;	// 1 Last Called
+char cfg_column_il_order3 = 3;	// 2 Phone Number
+char cfg_column_il_order4 = 1;	// 3 Total Calls
+
+// Ignore CID
+int cfg_column_icidl_width1 = 35;
+int cfg_column_icidl_width2 = 120;
+int cfg_column_icidl_width3 = 215;
+int cfg_column_icidl_width4 = 75;
+int cfg_column_icidl_width5 = 110;
+int cfg_column_icidl_width6 = 110;
+int cfg_column_icidl_width7 = 70;
+
+char cfg_column_icidl_order1 = 0;	// 0 # (always 0)
+char cfg_column_icidl_order2 = 1;	// 1 Caller ID
+char cfg_column_icidl_order3 = 3;	// 2 Last Called
+char cfg_column_icidl_order4 = 4;	// 3 Match Case
+char cfg_column_icidl_order5 = 5;	// 4 Match Whole Word
+char cfg_column_icidl_order6 = 6;	// 5 Regular Expression
+char cfg_column_icidl_order7 = 2;	// 6 Total Calls
 
 bool cfg_popup_enable_recording = false;
 wchar_t *cfg_recording = NULL;
@@ -202,22 +210,33 @@ unsigned char cfg_repeat_recording = 1;
 unsigned char cfg_drop_call_wait = 5;	// Seconds.
 GUID cfg_modem_guid;
 
-char *tab_order[ NUM_TABS ] = { &cfg_tab_order1, &cfg_tab_order2, &cfg_tab_order3 };
+POPUP_INFO *g_popup_info[] = { &cfg_popup_info1, &cfg_popup_info2, &cfg_popup_info3 };
 
-char *call_log_columns[ NUM_COLUMNS1 ] =	 { &cfg_column_order1, &cfg_column_order2, &cfg_column_order3, &cfg_column_order4, &cfg_column_order5, &cfg_column_order6 };
-char *contact_list_columns[ NUM_COLUMNS2 ] = { &cfg_column2_order1, &cfg_column2_order2, &cfg_column2_order3, &cfg_column2_order4, &cfg_column2_order5, &cfg_column2_order6, &cfg_column2_order7, &cfg_column2_order8, &cfg_column2_order9,
-											   &cfg_column2_order10, &cfg_column2_order11, &cfg_column2_order12, &cfg_column2_order13, &cfg_column2_order14, &cfg_column2_order15, &cfg_column2_order16, &cfg_column2_order17 };
-char *ignore_list_columns[ NUM_COLUMNS3 ] =  { &cfg_column3_order1, &cfg_column3_order2, &cfg_column3_order3 };
-char *ignore_cid_list_columns[ NUM_COLUMNS4 ] =  { &cfg_column4_order1, &cfg_column4_order2, &cfg_column4_order3, &cfg_column4_order4, &cfg_column4_order5 };
+char *tab_order[] = { &cfg_tab_order1, &cfg_tab_order2, &cfg_tab_order3, &cfg_tab_order4 };
 
+char *allow_list_columns[] =		{ &cfg_column_al_order1, &cfg_column_al_order2, &cfg_column_al_order3, &cfg_column_al_order4 };
+char *allow_cid_list_columns[] =	{ &cfg_column_acidl_order1, &cfg_column_acidl_order2, &cfg_column_acidl_order3, &cfg_column_acidl_order4, &cfg_column_acidl_order5, &cfg_column_acidl_order6, &cfg_column_acidl_order7 };
 
-int *call_log_columns_width[ NUM_COLUMNS1 ] =	  { &cfg_column_width1, &cfg_column_width2, &cfg_column_width3, &cfg_column_width4, &cfg_column_width5, &cfg_column_width6 };
-int *contact_list_columns_width[ NUM_COLUMNS2 ] = { &cfg_column2_width1, &cfg_column2_width2, &cfg_column2_width3, &cfg_column2_width4, &cfg_column2_width5, &cfg_column2_width6, &cfg_column2_width7, &cfg_column2_width8, &cfg_column2_width9,
-													&cfg_column2_width10, &cfg_column2_width11, &cfg_column2_width12, &cfg_column2_width13, &cfg_column2_width14, &cfg_column2_width15, &cfg_column2_width16, &cfg_column2_width17 };
-int *ignore_list_columns_width[ NUM_COLUMNS3 ] =  { &cfg_column3_width1, &cfg_column3_width2, &cfg_column3_width3 };
-int *ignore_cid_list_columns_width[ NUM_COLUMNS4 ] =  { &cfg_column4_width1, &cfg_column4_width2, &cfg_column4_width3, &cfg_column4_width4, &cfg_column4_width5 };
+char *call_log_columns[] =			{ &cfg_column_cll_order1, &cfg_column_cll_order2, &cfg_column_cll_order3, &cfg_column_cll_order4, &cfg_column_cll_order5, &cfg_column_cll_order6, &cfg_column_cll_order7, &cfg_column_cll_order8 };
 
-//unsigned short bad_area_codes[ 29 ] = { 211, 242, 246, 264, 268, 284, 311, 345, 411, 441, 473, 511, 611, 649, 664, 711, 758, 767, 784, 809, 811, 829, 849, 868, 869, 876, 900, 911, 976 };
+char *contact_list_columns[] =		{ &cfg_column_cl_order1, &cfg_column_cl_order2, &cfg_column_cl_order3, &cfg_column_cl_order4, &cfg_column_cl_order5, &cfg_column_cl_order6, &cfg_column_cl_order7, &cfg_column_cl_order8, &cfg_column_cl_order9,
+									  &cfg_column_cl_order10, &cfg_column_cl_order11, &cfg_column_cl_order12, &cfg_column_cl_order13, &cfg_column_cl_order14, &cfg_column_cl_order15, &cfg_column_cl_order16, &cfg_column_cl_order17 };
+
+char *ignore_list_columns[] =		{ &cfg_column_il_order1, &cfg_column_il_order2, &cfg_column_il_order3, &cfg_column_il_order4 };
+char *ignore_cid_list_columns[] =	{ &cfg_column_icidl_order1, &cfg_column_icidl_order2, &cfg_column_icidl_order3, &cfg_column_icidl_order4, &cfg_column_icidl_order5, &cfg_column_icidl_order6, &cfg_column_icidl_order7 };
+
+//
+
+int *allow_list_columns_width[] =		{ &cfg_column_al_width1, &cfg_column_al_width2, &cfg_column_al_width3, &cfg_column_al_width4 };
+int *allow_cid_list_columns_width[] =	{ &cfg_column_acidl_width1, &cfg_column_acidl_width2, &cfg_column_acidl_width3, &cfg_column_acidl_width4, &cfg_column_acidl_width5, &cfg_column_acidl_width6, &cfg_column_acidl_width7 };
+
+int *call_log_columns_width[] =			{ &cfg_column_cll_width1, &cfg_column_cll_width2, &cfg_column_cll_width3, &cfg_column_cll_width4, &cfg_column_cll_width5, &cfg_column_cll_width6, &cfg_column_cll_width7, &cfg_column_cll_width8 };
+
+int *contact_list_columns_width[] =		{ &cfg_column_cl_width1, &cfg_column_cl_width2, &cfg_column_cl_width3, &cfg_column_cl_width4, &cfg_column_cl_width5, &cfg_column_cl_width6, &cfg_column_cl_width7, &cfg_column_cl_width8, &cfg_column_cl_width9,
+										  &cfg_column_cl_width10, &cfg_column_cl_width11, &cfg_column_cl_width12, &cfg_column_cl_width13, &cfg_column_cl_width14, &cfg_column_cl_width15, &cfg_column_cl_width16, &cfg_column_cl_width17 };
+
+int *ignore_list_columns_width[] =		{ &cfg_column_il_width1, &cfg_column_il_width2, &cfg_column_il_width3, &cfg_column_il_width4 };
+int *ignore_cid_list_columns_width[] =	{ &cfg_column_icidl_width1, &cfg_column_icidl_width2, &cfg_column_icidl_width3, &cfg_column_icidl_width4, &cfg_column_icidl_width5, &cfg_column_icidl_width6, &cfg_column_icidl_width7 };
 
 #define ROTATE_LEFT( x, n ) ( ( ( x ) << ( n ) ) | ( ( x ) >> ( 8 - ( n ) ) ) )
 #define ROTATE_RIGHT( x, n ) ( ( ( x ) >> ( n ) ) | ( ( x ) << ( 8 - ( n ) ) ) )
@@ -310,11 +329,6 @@ int dllrbt_compare_ptr( void *a, void *b )
 	}
 }
 
-int dllrbt_compare_a( void *a, void *b )
-{
-	return lstrcmpA( ( char * )a, ( char * )b );
-}
-
 int dllrbt_compare_w( void *a, void *b )
 {
 	return lstrcmpW( ( wchar_t * )a, ( wchar_t * )b );
@@ -327,32 +341,43 @@ int dllrbt_compare_guid( void *a, void *b )
 
 int dllrbt_icid_compare( void *a, void *b )
 {
-	ignorecidinfo *a1 = ( ignorecidinfo * )a;
-	ignorecidinfo *b1 = ( ignorecidinfo * )b;
+	allow_ignore_cid_info *a1 = ( allow_ignore_cid_info * )a;
+	allow_ignore_cid_info *b1 = ( allow_ignore_cid_info * )b;
 
-	int ret = lstrcmpA( a1->c_caller_id, b1->c_caller_id );
+	int ret = lstrcmpW( a1->caller_id, b1->caller_id );
 
 	// See if the strings match.
 	if ( ret == 0 )
 	{
 		// If they do, then check if the booleans differ.
-		if ( a1->match_case && !b1->match_case )
+		if ( ( a1->match_flag & 0x02 ) && !( b1->match_flag & 0x02 ) )
 		{
 			ret = 1;
 		}
-		else if ( !a1->match_case && b1->match_case )
+		else if ( !( a1->match_flag & 0x02 ) && ( b1->match_flag & 0x02 ) )
 		{
 			ret = -1;
 		}
 		else
 		{
-			if ( a1->match_whole_word && !b1->match_whole_word )
+			if ( ( a1->match_flag & 0x01 ) && !( b1->match_flag & 0x01 ) )
 			{
 				ret = 1;
 			}
-			else if ( !a1->match_whole_word && b1->match_whole_word )
+			else if ( !( a1->match_flag & 0x01 ) && ( b1->match_flag & 0x01 ) )
 			{
 				ret = -1;
+			}
+			else
+			{
+				if ( ( a1->match_flag & 0x04 ) && !( b1->match_flag & 0x04 ) )
+				{
+					ret = 1;
+				}
+				else if ( !( a1->match_flag & 0x04 ) && ( b1->match_flag & 0x04 ) )
+				{
+					ret = -1;
+				}
 			}
 		}
 	}
@@ -360,29 +385,29 @@ int dllrbt_icid_compare( void *a, void *b )
 	return ret;
 }
 
-char is_num( const char *str )
+char is_num_w( const wchar_t *str )
 {
 	if ( str == NULL )
 	{
 		return -1;
 	}
 
-	unsigned char *s = ( unsigned char * )str;
+	wchar_t *s = ( wchar_t * )str;
 
 	char ret = 0;	// 0 = regular number, 1 = number with wildcard(s), -1 = not a number.
 
-	if ( *s != NULL && *s == '+' )
+	if ( *s != NULL && *s == L'+' )
 	{
 		*s++;
 	}
 
 	while ( *s != NULL )
 	{
-		if ( *s == '*' )
+		if ( *s == L'*' )
 		{
 			ret = 1;
 		}
-		else if ( !is_digit( *s ) )
+		else if ( !is_digit_w( *s ) )
 		{
 			return -1;
 		}
@@ -391,54 +416,6 @@ char is_num( const char *str )
 	}
 
 	return ret;
-}
-
-/*
-char from_hex( char ch )
-{
-	return is_digit( ch ) ? ch - '0' : ( char )_CharUpperA( ( LPSTR )ch ) - 'A' + 10;
-}
-*/
-char to_hex( char code )
-{
-	static char hex[] = "0123456789ABCDEF";
-	return hex[ code & 15 ];
-}
-
-char *url_encode( char *str, unsigned int str_len, unsigned int *enc_len )
-{
-	char *pstr = str;
-	char *buf = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * ( ( str_len * 3 ) + 1 ) );
-	char *pbuf = buf;
-
-	while ( pstr < ( str + str_len ) )
-	{
-		if ( _IsCharAlphaNumericA( *pstr ) )
-		{
-			*pbuf++ = *pstr;
-		}
-		else if ( *pstr == ' ' )
-		{
-			*pbuf++ = '+';
-		}
-		else
-		{
-			*pbuf++ = '%';
-			*pbuf++ = to_hex( *pstr >> 4 );
-			*pbuf++ = to_hex( *pstr & 15 );
-		}
-
-		pstr++;
-	}
-
-	*pbuf = '\0';
-
-	if ( enc_len != NULL )
-	{
-		*enc_len = pbuf - buf;
-	}
-
-	return buf;
 }
 
 wchar_t *GetMonth( unsigned short month )
@@ -465,7 +442,9 @@ void UnixTimeToSystemTime( DWORD t, SYSTEMTIME *st )
 {
 	FILETIME ft;
 	LARGE_INTEGER li;
-
+#ifdef _WIN64
+	li.QuadPart = t * 10000000LL;
+#else
 	// Multipy our time and store the 64bit integer. It's located in edx:eax
 	__asm
 	{
@@ -476,7 +455,7 @@ void UnixTimeToSystemTime( DWORD t, SYSTEMTIME *st )
 		mov li.HighPart, edx;
 		mov li.LowPart, eax;
 	}
-
+#endif
 	li.QuadPart += 116444736000000000;
 
 	ft.dwLowDateTime = li.LowPart;
@@ -500,10 +479,40 @@ void GetCurrentCounterTime( ULARGE_INTEGER *li )
 	}
 }
 
+wchar_t *FormatTimestamp( ULARGE_INTEGER timestamp )
+{
+	SYSTEMTIME st;
+	FILETIME ft;
+	ft.dwLowDateTime = timestamp.LowPart;
+	ft.dwHighDateTime = timestamp.HighPart;
+
+	FileTimeToSystemTime( &ft, &st );
+
+	#ifndef NTDLL_USE_STATIC_LIB
+		//buffer_length = 64;	// Should be enough to hold most translated values.
+		int buffer_length = __snwprintf( NULL, 0, L"%s, %s %d, %04d %d:%02d:%02d %s", GetDay( st.wDayOfWeek ), GetMonth( st.wMonth ), st.wDay, st.wYear, ( st.wHour > 12 ? st.wHour - 12 : ( st.wHour != 0 ? st.wHour : 12 ) ), st.wMinute, st.wSecond, ( st.wHour >= 12 ? L"PM" : L"AM" ) ) + 1;	// Include the NULL character.
+	#else
+		int buffer_length = _scwprintf( L"%s, %s %d, %04d %d:%02d:%02d %s", GetDay( st.wDayOfWeek ), GetMonth( st.wMonth ), st.wDay, st.wYear, ( st.wHour > 12 ? st.wHour - 12 : ( st.wHour != 0 ? st.wHour : 12 ) ), st.wMinute, st.wSecond, ( st.wHour >= 12 ? L"PM" : L"AM" ) ) + 1;	// Include the NULL character.
+	#endif
+
+	wchar_t *formatted_timestamp = NULL;
+
+	if ( buffer_length > 0 )
+	{
+		formatted_timestamp = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * buffer_length );
+
+		__snwprintf( formatted_timestamp, buffer_length, L"%s, %s %d, %04d %d:%02d:%02d %s", GetDay( st.wDayOfWeek ), GetMonth( st.wMonth ), st.wDay, st.wYear, ( st.wHour > 12 ? st.wHour - 12 : ( st.wHour != 0 ? st.wHour : 12 ) ), st.wMinute, st.wSecond, ( st.wHour >= 12 ? L"PM" : L"AM" ) );
+	}
+
+	return formatted_timestamp;
+}
+
 DWORD GetRemainingDropCallWaitTime( ULARGE_INTEGER start, ULARGE_INTEGER stop )
 {
 	stop.QuadPart -= start.QuadPart;
-
+#ifdef _WIN64
+	start.QuadPart = cfg_drop_call_wait * FILETIME_TICKS_PER_SECOND;
+#else
 	// Multiply the drop call wait time by the ticks/second.
 	__asm
 	{
@@ -514,12 +523,14 @@ DWORD GetRemainingDropCallWaitTime( ULARGE_INTEGER start, ULARGE_INTEGER stop )
 		mov		start.LowPart, eax				;// Store the low result.
 		mov		start.HighPart, edx				;// Store the carry result.
 	}
-
+#endif
 	// Sleep a little bit more if the audio playback was shorter than our drop call wait time.
 	if ( stop.QuadPart < start.QuadPart )
 	{
 		start.QuadPart -= stop.QuadPart;
-
+#ifdef _WIN64
+		start.QuadPart /= FILETIME_TICKS_PER_MILLISECOND;
+#else
 		// Divide the 64bit value.
 		__asm
 		{
@@ -533,7 +544,7 @@ DWORD GetRemainingDropCallWaitTime( ULARGE_INTEGER start, ULARGE_INTEGER stop )
 			mov start.LowPart, eax;		//; Store the low order quotient.
 			//; Any remainder will be stored in edx. We're not interested in it though.
 		}
-
+#endif
 		return ( DWORD )start.LowPart;
 	}
 	else
@@ -542,91 +553,53 @@ DWORD GetRemainingDropCallWaitTime( ULARGE_INTEGER start, ULARGE_INTEGER stop )
 	}
 }
 
-void free_displayinfo( displayinfo **di )
+void free_displayinfo( display_info **di )
 {
 	// Free the strings in our info structure.
-	GlobalFree( ( *di )->ci.call_from );
-	GlobalFree( ( *di )->ci.caller_id );
 	GlobalFree( ( *di )->phone_number );
 	GlobalFree( ( *di )->caller_id );
-	GlobalFree( ( *di )->w_ignore_caller_id );
-	GlobalFree( ( *di )->w_ignore_phone_number );
+	GlobalFree( ( *di )->custom_caller_id );
+	GlobalFree( ( *di )->w_phone_number );
 	GlobalFree( ( *di )->w_time );
-	// Then free the displayinfo structure.
+	// Then free the display_info structure.
 	GlobalFree( *di );
 	*di = NULL;
 }
 
-void free_contactinfo( contactinfo **ci )
+void free_contactinfo( contact_info **ci )
 {
+	char i;
+
 	// Free the strings in our info structure.
-	GlobalFree( ( *ci )->contact.cell_phone_number );
-	GlobalFree( ( *ci )->contact.first_name );
-	GlobalFree( ( *ci )->contact.home_phone_number );
-	GlobalFree( ( *ci )->contact.last_name );
-	GlobalFree( ( *ci )->contact.nickname );
-	GlobalFree( ( *ci )->contact.office_phone_number );
-	GlobalFree( ( *ci )->contact.other_phone_number );
-
-	GlobalFree( ( *ci )->contact.title );
-	GlobalFree( ( *ci )->contact.business_name );
-	GlobalFree( ( *ci )->contact.designation );
-	GlobalFree( ( *ci )->contact.department );
-	GlobalFree( ( *ci )->contact.category );
-	GlobalFree( ( *ci )->contact.work_phone_number );
-	GlobalFree( ( *ci )->contact.fax_number );
-	GlobalFree( ( *ci )->contact.email_address );
-	GlobalFree( ( *ci )->contact.web_page );
-
-	GlobalFree( ( *ci )->first_name );
-	GlobalFree( ( *ci )->last_name );
-	GlobalFree( ( *ci )->nickname );
-	GlobalFree( ( *ci )->home_phone_number );
-	GlobalFree( ( *ci )->cell_phone_number );
-	GlobalFree( ( *ci )->office_phone_number );
-	GlobalFree( ( *ci )->other_phone_number );
-
-	GlobalFree( ( *ci )->title );
-	GlobalFree( ( *ci )->business_name );
-	GlobalFree( ( *ci )->designation );
-	GlobalFree( ( *ci )->department );
-	GlobalFree( ( *ci )->category );
-	GlobalFree( ( *ci )->work_phone_number );
-	GlobalFree( ( *ci )->fax_number );
-	GlobalFree( ( *ci )->email_address );
-	GlobalFree( ( *ci )->web_page );
+	for ( i = 0; i < 16; ++i )
+	{
+		GlobalFree( ( *ci )->w_contact_info_values[ i ] );
+	}
 
 	GlobalFree( ( *ci )->picture_path );
 
-	// Do not free ( *ci )->ringtone_info or its values.
+	// Do not free ( *ci )->rti or its values.
 
-	// Then free the contactinfo structure.
+	// Then free the contact_info structure.
 	GlobalFree( *ci );
 	*ci = NULL;
 }
 
-void free_ignoreinfo( ignoreinfo **ii )
+void free_allowignoreinfo( allow_ignore_info **aii )
 {
-	GlobalFree( ( *ii )->phone_number );
-	GlobalFree( ( *ii )->total_calls );
-	GlobalFree( ( *ii )->c_phone_number );
-	GlobalFree( ( *ii )->c_total_calls );
-	GlobalFree( *ii );
-	*ii = NULL;
+	GlobalFree( ( *aii )->w_last_called );
+	GlobalFree( ( *aii )->w_phone_number );
+	GlobalFree( ( *aii )->phone_number );
+	GlobalFree( *aii );
+	*aii = NULL;
 }
 
-void free_ignorecidinfo( ignorecidinfo **icidi )
+void free_allowignorecidinfo( allow_ignore_cid_info **aicidi )
 {
-	GlobalFree( ( *icidi )->caller_id );
-	GlobalFree( ( *icidi )->w_match_case );
-	GlobalFree( ( *icidi )->w_match_whole_word );
-	GlobalFree( ( *icidi )->total_calls );
-	GlobalFree( ( *icidi )->c_caller_id );
-	GlobalFree( ( *icidi )->c_match_case );
-	GlobalFree( ( *icidi )->c_match_whole_word );
-	GlobalFree( ( *icidi )->c_total_calls );
-	GlobalFree( *icidi );
-	*icidi = NULL;
+	GlobalFree( ( *aicidi )->w_last_called );
+	GlobalFree( ( *aicidi )->caller_id );
+	GlobalFree( *aicidi );
+	*aicidi = NULL;
 }
 
 void OffsetVirtualIndices( int *arr, char *column_arr[], unsigned char num_columns, unsigned char total_columns )
@@ -691,8 +664,29 @@ void UpdateColumnOrders()
 {
 	int arr[ 17 ];
 	int offset = 0;
-	_SendMessageW( g_hWnd_call_log, LVM_GETCOLUMNORDERARRAY, total_columns1, ( LPARAM )arr );
+
+	_SendMessageW( g_hWnd_allow_list, LVM_GETCOLUMNORDERARRAY, g_total_columns1, ( LPARAM )arr );
 	for ( int i = 0; i < NUM_COLUMNS1; ++i )
+	{
+		if ( *allow_list_columns[ i ] != -1 )
+		{
+			*allow_list_columns[ i ] = ( char )arr[ offset++ ];
+		}
+	}
+
+	offset = 0;
+	_SendMessageW( g_hWnd_allow_cid_list, LVM_GETCOLUMNORDERARRAY, g_total_columns2, ( LPARAM )arr );
+	for ( int i = 0; i < NUM_COLUMNS2; ++i )
+	{
+		if ( *allow_cid_list_columns[ i ] != -1 )
+		{
+			*allow_cid_list_columns[ i ] = ( char )arr[ offset++ ];
+		}
+	}
+
+	offset = 0;
+	_SendMessageW( g_hWnd_call_log, LVM_GETCOLUMNORDERARRAY, g_total_columns3, ( LPARAM )arr );
+	for ( int i = 0; i < NUM_COLUMNS3; ++i )
 	{
 		if ( *call_log_columns[ i ] != -1 )
 		{
@@ -701,8 +695,8 @@ void UpdateColumnOrders()
 	}
 
 	offset = 0;
-	_SendMessageW( g_hWnd_contact_list, LVM_GETCOLUMNORDERARRAY, total_columns2, ( LPARAM )arr );
-	for ( int i = 0; i < NUM_COLUMNS2; ++i )
+	_SendMessageW( g_hWnd_contact_list, LVM_GETCOLUMNORDERARRAY, g_total_columns4, ( LPARAM )arr );
+	for ( int i = 0; i < NUM_COLUMNS4; ++i )
 	{
 		if ( *contact_list_columns[ i ] != -1 )
 		{
@@ -711,8 +705,8 @@ void UpdateColumnOrders()
 	}
 
 	offset = 0;
-	_SendMessageW( g_hWnd_ignore_list, LVM_GETCOLUMNORDERARRAY, total_columns3, ( LPARAM )arr );
-	for ( int i = 0; i < NUM_COLUMNS3; ++i )
+	_SendMessageW( g_hWnd_ignore_list, LVM_GETCOLUMNORDERARRAY, g_total_columns5, ( LPARAM )arr );
+	for ( int i = 0; i < NUM_COLUMNS5; ++i )
 	{
 		if ( *ignore_list_columns[ i ] != -1 )
 		{
@@ -721,8 +715,8 @@ void UpdateColumnOrders()
 	}
 
 	offset = 0;
-	_SendMessageW( g_hWnd_ignore_cid_list, LVM_GETCOLUMNORDERARRAY, total_columns4, ( LPARAM )arr );
-	for ( int i = 0; i < NUM_COLUMNS4; ++i )
+	_SendMessageW( g_hWnd_ignore_cid_list, LVM_GETCOLUMNORDERARRAY, g_total_columns6, ( LPARAM )arr );
+	for ( int i = 0; i < NUM_COLUMNS6; ++i )
 	{
 		if ( *ignore_cid_list_columns[ i ] != -1 )
 		{
@@ -737,52 +731,78 @@ void SetDefaultColumnOrder( unsigned char list )
 	{
 		case 0:
 		{
-			cfg_column_order1 = 0;		// # (always 0)
-			cfg_column_order2 = 1;		// Caller ID
-			cfg_column_order3 = 3;		// Date and Time
-			cfg_column_order4 = -1;		// Ignored Caller ID
-			cfg_column_order5 = -1;		// Ignored Phone Number
-			cfg_column_order6 = 2;		// Phone Number
+			cfg_column_al_order1 = 0;		// 0 # (always 0)
+			cfg_column_al_order2 = 2;		// 1 Last Called
+			cfg_column_al_order3 = 3;		// 2 Phone Number
+			cfg_column_al_order4 = 1;		// 3 Total Calls
 		}
 		break;
 
 		case 1:
 		{
-			cfg_column2_order1 = 0;		// 0 # (always 0)
-			cfg_column2_order2 = 14;	// 1 Cell Phone
-			cfg_column2_order3 = 6;		// 2 Company
-			cfg_column2_order4 = 9;		// 3 Department
-			cfg_column2_order5 = 10;	// 4 Email Address
-			cfg_column2_order6 = 7;		// 5 Fax Number
-			cfg_column2_order7 = 1;		// 6 First Name
-			cfg_column2_order8 = 13;	// 7 Home Phone
-			cfg_column2_order9 = 8;		// 8 Job Title
-			cfg_column2_order10 = 2;	// 9 Last Name
-			cfg_column2_order11 = 16;	// 10 Nickname
-			cfg_column2_order12 = 3;	// 11 Office Phone
-			cfg_column2_order13 = 11;	// 12 Other Phone
-			cfg_column2_order14 = 12;	// 13 Profession
-			cfg_column2_order15 = 5;	// 14 Title
-			cfg_column2_order16 = 4;	// 15 Web Page
-			cfg_column2_order17 = 15;	// 16 Work Phone
+			cfg_column_acidl_order1 = 0;	// 0 # (always 0)
+			cfg_column_acidl_order2 = 1;	// 1 Caller ID
+			cfg_column_acidl_order3 = 3;	// 2 Last Called
+			cfg_column_acidl_order4 = 4;	// 3 Match Case
+			cfg_column_acidl_order5 = 5;	// 4 Match Whole Word
+			cfg_column_acidl_order6 = 6;	// 5 Regular Expression
+			cfg_column_acidl_order7 = 2;	// 6 Total Calls
 		}
 		break;
 
 		case 2:
 		{
-			cfg_column3_order1 = 0;		// 0 # (always 0)
-			cfg_column3_order2 = 1;		// 1 Phone Number
-			cfg_column3_order3 = 2;		// 2 Total Calls
+			cfg_column_cll_order1 = 0;		// # (always 0)
+			cfg_column_cll_order2 = -1;		// Allowed Caller ID
+			cfg_column_cll_order3 = -1;		// Allowed Phone Number
+			cfg_column_cll_order4 = 1;		// Caller ID
+			cfg_column_cll_order5 = 3;		// Date and Time
+			cfg_column_cll_order6 = -1;		// Ignored Caller ID
+			cfg_column_cll_order7 = -1;		// Ignored Phone Number
+			cfg_column_cll_order8 = 2;		// Phone Number
 		}
 		break;
 
 		case 3:
 		{
-			cfg_column4_order1 = 0;	// 0 # (always 0)
-			cfg_column4_order2 = 1;	// 1 Caller ID
-			cfg_column4_order3 = 2;	// 2 Match Case
-			cfg_column4_order4 = 3;	// 3 Match Whole Word
-			cfg_column4_order5 = 4;	// 4 Total Calls
+			cfg_column_cl_order1 = 0;		// 0 # (always 0)
+			cfg_column_cl_order2 = 14;		// 1 Cell Phone
+			cfg_column_cl_order3 = 6;		// 2 Company
+			cfg_column_cl_order4 = 9;		// 3 Department
+			cfg_column_cl_order5 = 10;		// 4 Email Address
+			cfg_column_cl_order6 = 7;		// 5 Fax Number
+			cfg_column_cl_order7 = 1;		// 6 First Name
+			cfg_column_cl_order8 = 13;		// 7 Home Phone
+			cfg_column_cl_order9 = 8;		// 8 Job Title
+			cfg_column_cl_order10 = 2;		// 9 Last Name
+			cfg_column_cl_order11 = 16;		// 10 Nickname
+			cfg_column_cl_order12 = 3;		// 11 Office Phone
+			cfg_column_cl_order13 = 11;		// 12 Other Phone
+			cfg_column_cl_order14 = 12;		// 13 Profession
+			cfg_column_cl_order15 = 5;		// 14 Title
+			cfg_column_cl_order16 = 4;		// 15 Web Page
+			cfg_column_cl_order17 = 15;		// 16 Work Phone
+		}
+		break;
+
+		case 4:
+		{
+			cfg_column_il_order1 = 0;		// 0 # (always 0)
+			cfg_column_il_order2 = 2;		// 1 Last Called
+			cfg_column_il_order3 = 3;		// 2 Phone Number
+			cfg_column_il_order4 = 1;		// 3 Total Calls
+		}
+		break;
+
+		case 5:
+		{
+			cfg_column_icidl_order1 = 0;	// 0 # (always 0)
+			cfg_column_icidl_order2 = 1;	// 1 Caller ID
+			cfg_column_icidl_order3 = 3;	// 2 Last Called
+			cfg_column_icidl_order4 = 4;	// 3 Match Case
+			cfg_column_icidl_order5 = 5;	// 4 Match Whole Word
+			cfg_column_icidl_order6 = 6;	// 5 Regular Expression
+			cfg_column_icidl_order7 = 2;	// 6 Total Calls
 		}
 		break;
 	}
@@ -832,73 +852,58 @@ void CheckColumnOrders( unsigned char list, char *column_arr[], unsigned char nu
 
 void CheckColumnWidths()
 {
-	if ( cfg_column_width1 < 0 || cfg_column_width1 > 2560 ) { cfg_column_width1 = 35; }
-	if ( cfg_column_width2 < 0 || cfg_column_width2 > 2560 ) { cfg_column_width2 = 100; }
-	if ( cfg_column_width3 < 0 || cfg_column_width3 > 2560 ) { cfg_column_width3 = 205; }
-	if ( cfg_column_width4 < 0 || cfg_column_width4 > 2560 ) { cfg_column_width4 = 130; }
-	if ( cfg_column_width5 < 0 || cfg_column_width5 > 2560 ) { cfg_column_width5 = 130; }
-	if ( cfg_column_width6 < 0 || cfg_column_width6 > 2560 ) { cfg_column_width6 = 100; }
+	if ( cfg_column_al_width1 < 0 || cfg_column_al_width1 > 2560 ) { cfg_column_al_width1 = 35; }
+	if ( cfg_column_al_width2 < 0 || cfg_column_al_width2 > 2560 ) { cfg_column_al_width2 = 215; }
+	if ( cfg_column_al_width3 < 0 || cfg_column_al_width3 > 2560 ) { cfg_column_al_width3 = 120; }
+	if ( cfg_column_al_width4 < 0 || cfg_column_al_width4 > 2560 ) { cfg_column_al_width4 = 70; }
 
-	if ( cfg_column2_width1 < 0 || cfg_column2_width1 > 2560 ) { cfg_column2_width1 = 35; }
-	if ( cfg_column2_width2 < 0 || cfg_column2_width2 > 2560 ) { cfg_column2_width2 = 120; }
-	if ( cfg_column2_width3 < 0 || cfg_column2_width3 > 2560 ) { cfg_column2_width3 = 100; }
-	if ( cfg_column2_width4 < 0 || cfg_column2_width4 > 2560 ) { cfg_column2_width4 = 100; }
-	if ( cfg_column2_width5 < 0 || cfg_column2_width5 > 2560 ) { cfg_column2_width5 = 150; }
-	if ( cfg_column2_width6 < 0 || cfg_column2_width6 > 2560 ) { cfg_column2_width6 = 120; }
-	if ( cfg_column2_width7 < 0 || cfg_column2_width7 > 2560 ) { cfg_column2_width7 = 100; }
-	if ( cfg_column2_width8 < 0 || cfg_column2_width8 > 2560 ) { cfg_column2_width8 = 120; }
-	if ( cfg_column2_width9 < 0 || cfg_column2_width9 > 2560 ) { cfg_column2_width9 = 100; }
-	if ( cfg_column2_width10 < 0 || cfg_column2_width10 > 2560 ) { cfg_column2_width10 = 100; }
-	if ( cfg_column2_width11 < 0 || cfg_column2_width11 > 2560 ) { cfg_column2_width11 = 100; }
-	if ( cfg_column2_width12 < 0 || cfg_column2_width12 > 2560 ) { cfg_column2_width12 = 120; }
-	if ( cfg_column2_width13 < 0 || cfg_column2_width13 > 2560 ) { cfg_column2_width13 = 120; }
-	if ( cfg_column2_width14 < 0 || cfg_column2_width14 > 2560 ) { cfg_column2_width14 = 100; }
-	if ( cfg_column2_width15 < 0 || cfg_column2_width15 > 2560 ) { cfg_column2_width15 = 70; }
-	if ( cfg_column2_width16 < 0 || cfg_column2_width16 > 2560 ) { cfg_column2_width16 = 300; }
-	if ( cfg_column2_width17 < 0 || cfg_column2_width17 > 2560 ) { cfg_column2_width17 = 120; }
+	if ( cfg_column_acidl_width1 < 0 || cfg_column_acidl_width1 > 2560 ) { cfg_column_acidl_width1 = 35; }
+	if ( cfg_column_acidl_width2 < 0 || cfg_column_acidl_width2 > 2560 ) { cfg_column_acidl_width2 = 120; }
+	if ( cfg_column_acidl_width3 < 0 || cfg_column_acidl_width3 > 2560 ) { cfg_column_acidl_width3 = 215; }
+	if ( cfg_column_acidl_width4 < 0 || cfg_column_acidl_width4 > 2560 ) { cfg_column_acidl_width4 = 75; }
+	if ( cfg_column_acidl_width5 < 0 || cfg_column_acidl_width5 > 2560 ) { cfg_column_acidl_width5 = 110; }
+	if ( cfg_column_acidl_width6 < 0 || cfg_column_acidl_width6 > 2560 ) { cfg_column_acidl_width6 = 110; }
+	if ( cfg_column_acidl_width7 < 0 || cfg_column_acidl_width7 > 2560 ) { cfg_column_acidl_width7 = 70; }
 
-	if ( cfg_column3_width1 < 0 || cfg_column3_width1 > 2560 ) { cfg_column3_width1 = 35; }
-	if ( cfg_column3_width2 < 0 || cfg_column3_width2 > 2560 ) { cfg_column3_width2 = 100; }
-	if ( cfg_column3_width3 < 0 || cfg_column3_width3 > 2560 ) { cfg_column3_width3 = 70; }
+	if ( cfg_column_cll_width1 < 0 || cfg_column_cll_width1 > 2560 ) { cfg_column_cll_width1 = 35; }
+	if ( cfg_column_cll_width2 < 0 || cfg_column_cll_width2 > 2560 ) { cfg_column_cll_width2 = 130; }
+	if ( cfg_column_cll_width3 < 0 || cfg_column_cll_width3 > 2560 ) { cfg_column_cll_width3 = 130; }
+	if ( cfg_column_cll_width4 < 0 || cfg_column_cll_width4 > 2560 ) { cfg_column_cll_width4 = 120; }
+	if ( cfg_column_cll_width5 < 0 || cfg_column_cll_width5 > 2560 ) { cfg_column_cll_width5 = 215; }
+	if ( cfg_column_cll_width6 < 0 || cfg_column_cll_width6 > 2560 ) { cfg_column_cll_width6 = 130; }
+	if ( cfg_column_cll_width7 < 0 || cfg_column_cll_width7 > 2560 ) { cfg_column_cll_width7 = 130; }
+	if ( cfg_column_cll_width8 < 0 || cfg_column_cll_width8 > 2560 ) { cfg_column_cll_width8 = 120; }
 
-	if ( cfg_column4_width1 < 0 || cfg_column4_width1 > 2560 ) { cfg_column4_width1 = 35; }
-	if ( cfg_column4_width2 < 0 || cfg_column4_width2 > 2560 ) { cfg_column4_width2 = 100; }
-	if ( cfg_column4_width3 < 0 || cfg_column4_width3 > 2560 ) { cfg_column4_width3 = 75; }
-	if ( cfg_column4_width4 < 0 || cfg_column4_width4 > 2560 ) { cfg_column4_width4 = 110; }
-	if ( cfg_column4_width5 < 0 || cfg_column4_width5 > 2560 ) { cfg_column4_width5 = 70; }
-}
+	if ( cfg_column_cl_width1 < 0 || cfg_column_cl_width1 > 2560 ) { cfg_column_cl_width1 = 35; }
+	if ( cfg_column_cl_width2 < 0 || cfg_column_cl_width2 > 2560 ) { cfg_column_cl_width2 = 120; }
+	if ( cfg_column_cl_width3 < 0 || cfg_column_cl_width3 > 2560 ) { cfg_column_cl_width3 = 100; }
+	if ( cfg_column_cl_width4 < 0 || cfg_column_cl_width4 > 2560 ) { cfg_column_cl_width4 = 100; }
+	if ( cfg_column_cl_width5 < 0 || cfg_column_cl_width5 > 2560 ) { cfg_column_cl_width5 = 150; }
+	if ( cfg_column_cl_width6 < 0 || cfg_column_cl_width6 > 2560 ) { cfg_column_cl_width6 = 120; }
+	if ( cfg_column_cl_width7 < 0 || cfg_column_cl_width7 > 2560 ) { cfg_column_cl_width7 = 100; }
+	if ( cfg_column_cl_width8 < 0 || cfg_column_cl_width8 > 2560 ) { cfg_column_cl_width8 = 120; }
+	if ( cfg_column_cl_width9 < 0 || cfg_column_cl_width9 > 2560 ) { cfg_column_cl_width9 = 100; }
+	if ( cfg_column_cl_width10 < 0 || cfg_column_cl_width10 > 2560 ) { cfg_column_cl_width10 = 100; }
+	if ( cfg_column_cl_width11 < 0 || cfg_column_cl_width11 > 2560 ) { cfg_column_cl_width11 = 100; }
+	if ( cfg_column_cl_width12 < 0 || cfg_column_cl_width12 > 2560 ) { cfg_column_cl_width12 = 120; }
+	if ( cfg_column_cl_width13 < 0 || cfg_column_cl_width13 > 2560 ) { cfg_column_cl_width13 = 120; }
+	if ( cfg_column_cl_width14 < 0 || cfg_column_cl_width14 > 2560 ) { cfg_column_cl_width14 = 100; }
+	if ( cfg_column_cl_width15 < 0 || cfg_column_cl_width15 > 2560 ) { cfg_column_cl_width15 = 70; }
+	if ( cfg_column_cl_width16 < 0 || cfg_column_cl_width16 > 2560 ) { cfg_column_cl_width16 = 300; }
+	if ( cfg_column_cl_width17 < 0 || cfg_column_cl_width17 > 2560 ) { cfg_column_cl_width17 = 120; }
 
-char *GetFileExtension( char *path )
-{
-	if ( path == NULL )
-	{
-		return NULL;
-	}
+	if ( cfg_column_il_width1 < 0 || cfg_column_il_width1 > 2560 ) { cfg_column_il_width1 = 35; }
+	if ( cfg_column_il_width2 < 0 || cfg_column_il_width2 > 2560 ) { cfg_column_il_width2 = 215; }
+	if ( cfg_column_il_width3 < 0 || cfg_column_il_width3 > 2560 ) { cfg_column_il_width3 = 120; }
+	if ( cfg_column_il_width4 < 0 || cfg_column_il_width4 > 2560 ) { cfg_column_il_width4 = 70; }
 
-	unsigned short length = lstrlenA( path );
-
-	while ( length != 0 && path[ --length ] != L'.' );
-
-	return path + length;
-}
-
-
-char *GetFileNameA( char *path )
-{
-	if ( path == NULL )
-	{
-		return NULL;
-	}
-
-	unsigned short length = lstrlenA( path );
-
-	while ( length != 0 && path[ --length ] != '\\' );
-
-	if ( path[ length ] == '\\' )
-	{
-		++length;
-	}
-	return path + length;
+	if ( cfg_column_icidl_width1 < 0 || cfg_column_icidl_width1 > 2560 ) { cfg_column_icidl_width1 = 35; }
+	if ( cfg_column_icidl_width2 < 0 || cfg_column_icidl_width2 > 2560 ) { cfg_column_icidl_width2 = 120; }
+	if ( cfg_column_icidl_width3 < 0 || cfg_column_icidl_width3 > 2560 ) { cfg_column_icidl_width3 = 215; }
+	if ( cfg_column_icidl_width4 < 0 || cfg_column_icidl_width4 > 2560 ) { cfg_column_icidl_width4 = 75; }
+	if ( cfg_column_icidl_width5 < 0 || cfg_column_icidl_width5 > 2560 ) { cfg_column_icidl_width5 = 110; }
+	if ( cfg_column_icidl_width6 < 0 || cfg_column_icidl_width6 > 2560 ) { cfg_column_icidl_width6 = 110; }
+	if ( cfg_column_icidl_width7 < 0 || cfg_column_icidl_width7 > 2560 ) { cfg_column_icidl_width7 = 70; }
 }
 
 wchar_t *GetFileNameW( wchar_t *path )
@@ -919,58 +924,11 @@ wchar_t *GetFileNameW( wchar_t *path )
 	return path + length;
 }
 
-char *GetMIMEByFileName( char *filename )
-{
-	static char *image_type[ 4 ] = { "image/bmp", "image/gif", "image/jpeg", "image/png" };
-	if ( filename != NULL )
-	{
-		char *extension = GetFileExtension( filename ) + 1;
-
-		if ( extension != NULL )
-		{
-			if ( lstrcmpiA( extension, "jpg" ) == 0 )
-			{
-				return image_type[ 2 ];
-			}
-			else if ( lstrcmpiA( extension, "png" ) == 0 )
-			{
-				return image_type[ 3 ];
-			}
-			else if ( lstrcmpiA( extension, "gif" ) == 0 )
-			{
-				return image_type[ 1 ];
-			}
-			else if ( lstrcmpiA( extension, "bmp" ) == 0 )
-			{
-				return image_type[ 0 ];
-			}
-			else if ( lstrcmpiA( extension, "jpeg" ) == 0 )
-			{
-				return image_type[ 2 ];
-			}
-			else if ( lstrcmpiA( extension, "jpe" ) == 0 )
-			{
-				return image_type[ 2 ];
-			}
-			else if ( lstrcmpiA( extension, "jfif" ) == 0 )
-			{
-				return image_type[ 2 ];
-			}
-			else if ( lstrcmpiA( extension, "dib" ) == 0 )
-			{
-				return image_type[ 0 ];
-			}
-		}
-	}
-	
-	return "application/unknown";
-}
-
 HWND GetCurrentListView()
 {
 	HWND hWnd = NULL;
 
-	int index = _SendMessageW( g_hWnd_tab, TCM_GETCURSEL, 0, 0 );	// Get the selected tab
+	int index = ( int )_SendMessageW( g_hWnd_tab, TCM_GETCURSEL, 0, 0 );	// Get the selected tab
 	if ( index != -1 )
 	{
 		TCITEM tie;
@@ -978,9 +936,9 @@ HWND GetCurrentListView()
 		tie.mask = TCIF_PARAM; // Get the lparam value
 		_SendMessageW( g_hWnd_tab, TCM_GETITEM, index, ( LPARAM )&tie );	// Get the selected tab's information
 
-		if ( ( HWND )tie.lParam == g_hWnd_ignore_tab )
+		if ( ( HWND )tie.lParam == g_hWnd_allow_tab || ( HWND )tie.lParam == g_hWnd_ignore_tab )
 		{
-			index = _SendMessageW( ( HWND )tie.lParam, TCM_GETCURSEL, 0, 0 );	// Get the selected tab
+			index = ( int )_SendMessageW( ( HWND )tie.lParam, TCM_GETCURSEL, 0, 0 );	// Get the selected tab
 			if ( index != -1 )
 			{
 				_SendMessageW( ( HWND )tie.lParam, TCM_GETITEM, index, ( LPARAM )&tie );	// Get the selected tab's information
@@ -993,70 +951,68 @@ HWND GetCurrentListView()
 	return hWnd;
 }
 
-char *GetSelectedColumnPhoneNumber( unsigned int column_id )
+wchar_t *GetSelectedColumnPhoneNumber( HWND hWnd, unsigned int column_id )
 {
-	char *phone_number = NULL;
+	wchar_t *phone_number = NULL;
 
-	LVITEM lvi;
-	_memzero( &lvi, sizeof( LVITEM ) );
-	lvi.mask = LVIF_PARAM;
-
-	if ( column_id == MENU_PHONE_NUMBER_COL15 ||
-		 column_id == MENU_PHONE_NUMBER_COL18 ||
-		 column_id == MENU_PHONE_NUMBER_COL110 )
+	if ( hWnd != NULL )
 	{
-		lvi.iItem = _SendMessageW( g_hWnd_call_log, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
+		LVITEM lvi;
+		_memzero( &lvi, sizeof( LVITEM ) );
+		lvi.mask = LVIF_PARAM;
 
-		if ( lvi.iItem != -1 )
+		if ( column_id == MENU_PHONE_NUMBER_COL17 )
 		{
-			_SendMessageW( g_hWnd_call_log, LVM_GETITEM, 0, ( LPARAM )&lvi );
+			lvi.iItem = ( int )_SendMessageW( hWnd, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
 
-			switch ( column_id )
+			if ( lvi.iItem != -1 )
 			{
-				case MENU_PHONE_NUMBER_COL18: { phone_number = ( ( displayinfo * )lvi.lParam )->ci.call_from; } break;
+				_SendMessageW( hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi );
+
+				phone_number = ( ( display_info * )lvi.lParam )->phone_number;
 			}
 		}
-	}
-	else if ( column_id == MENU_PHONE_NUMBER_COL21 ||
-			  column_id == MENU_PHONE_NUMBER_COL25 ||
-			  column_id == MENU_PHONE_NUMBER_COL27 ||
-			  column_id == MENU_PHONE_NUMBER_COL211 ||
-			  column_id == MENU_PHONE_NUMBER_COL212 || 
-			  column_id == MENU_PHONE_NUMBER_COL216 )
-	{
-		lvi.iItem = _SendMessageW( g_hWnd_contact_list, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
-
-		if ( lvi.iItem != -1 )
+		else if ( column_id == MENU_PHONE_NUMBER_COL21 ||
+				  column_id == MENU_PHONE_NUMBER_COL25 ||
+				  column_id == MENU_PHONE_NUMBER_COL27 ||
+				  column_id == MENU_PHONE_NUMBER_COL211 ||
+				  column_id == MENU_PHONE_NUMBER_COL212 || 
+				  column_id == MENU_PHONE_NUMBER_COL216 )
 		{
-			_SendMessageW( g_hWnd_contact_list, LVM_GETITEM, 0, ( LPARAM )&lvi );
+			lvi.iItem = ( int )_SendMessageW( hWnd, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
 
-			switch ( column_id )
+			if ( lvi.iItem != -1 )
 			{
-				case MENU_PHONE_NUMBER_COL21: { phone_number = ( ( contactinfo * )lvi.lParam )->contact.cell_phone_number; } break;
-				case MENU_PHONE_NUMBER_COL25: { phone_number = ( ( contactinfo * )lvi.lParam )->contact.fax_number; } break;
-				case MENU_PHONE_NUMBER_COL27: { phone_number = ( ( contactinfo * )lvi.lParam )->contact.home_phone_number; } break;
-				case MENU_PHONE_NUMBER_COL211: { phone_number = ( ( contactinfo * )lvi.lParam )->contact.office_phone_number; } break;
-				case MENU_PHONE_NUMBER_COL212: { phone_number = ( ( contactinfo * )lvi.lParam )->contact.other_phone_number; } break;
-				case MENU_PHONE_NUMBER_COL216: { phone_number = ( ( contactinfo * )lvi.lParam )->contact.work_phone_number; } break;
+				_SendMessageW( hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi );
+
+				switch ( column_id )
+				{
+					case MENU_PHONE_NUMBER_COL21: { phone_number = ( ( contact_info * )lvi.lParam )->cell_phone_number; } break;
+					case MENU_PHONE_NUMBER_COL25: { phone_number = ( ( contact_info * )lvi.lParam )->fax_number; } break;
+					case MENU_PHONE_NUMBER_COL27: { phone_number = ( ( contact_info * )lvi.lParam )->home_phone_number; } break;
+					case MENU_PHONE_NUMBER_COL211: { phone_number = ( ( contact_info * )lvi.lParam )->office_phone_number; } break;
+					case MENU_PHONE_NUMBER_COL212: { phone_number = ( ( contact_info * )lvi.lParam )->other_phone_number; } break;
+					case MENU_PHONE_NUMBER_COL216: { phone_number = ( ( contact_info * )lvi.lParam )->work_phone_number; } break;
+				}
 			}
 		}
-	}
-	else if ( column_id == MENU_PHONE_NUMBER_COL31 )
-	{
-		lvi.iItem = _SendMessageW( g_hWnd_ignore_list, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
-
-		if ( lvi.iItem != -1 )
+		else if ( column_id == MENU_PHONE_NUMBER_COL32 )
 		{
-			_SendMessageW( g_hWnd_ignore_list, LVM_GETITEM, 0, ( LPARAM )&lvi );
+			lvi.iItem = ( int )_SendMessageW( hWnd, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
 
-			phone_number = ( ( ignoreinfo * )lvi.lParam )->c_phone_number;
+			if ( lvi.iItem != -1 )
+			{
+				_SendMessageW( hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi );
+
+				phone_number = ( ( allow_ignore_info * )lvi.lParam )->phone_number;
+			}
 		}
 	}
 
 	return phone_number;
 }
 
-void CreatePopup( displayinfo *fi )
+void CreatePopup( display_info *di )
 {
 	RECT wa;
 	_SystemParametersInfoW( SPI_GETWORKAREA, 0, &wa, 0 );	
@@ -1085,22 +1041,21 @@ void CreatePopup( displayinfo *fi )
 		top = wa.bottom - cfg_popup_height;
 	}
 
-
 	HWND hWnd_popup = _CreateWindowExW( WS_EX_NOPARENTNOTIFY | WS_EX_NOACTIVATE | WS_EX_TOPMOST, L"popup", NULL, WS_CLIPCHILDREN | WS_POPUP | ( cfg_popup_hide_border ? NULL : WS_THICKFRAME ), left, top, cfg_popup_width, cfg_popup_height, g_hWnd_main, NULL, NULL, NULL );
 
-	_SetWindowLongW( hWnd_popup, GWL_EXSTYLE, _GetWindowLongW( hWnd_popup, GWL_EXSTYLE ) | WS_EX_LAYERED );
+	_SetWindowLongPtrW( hWnd_popup, GWL_EXSTYLE, _GetWindowLongPtrW( hWnd_popup, GWL_EXSTYLE ) | WS_EX_LAYERED );
 	_SetLayeredWindowAttributes( hWnd_popup, 0, cfg_popup_transparency, LWA_ALPHA );
 
 	// ALL OF THIS IS FREED IN WM_DESTROY OF THE POPUP WINDOW.
 
-	wchar_t *phone_line = GlobalStrDupW( fi->phone_number );;
-	wchar_t *caller_id_line = GlobalStrDupW( fi->caller_id );
+	wchar_t *phone_line = GlobalStrDupW( di->w_phone_number );
+	wchar_t *caller_id_line = GlobalStrDupW( di->caller_id );
 	wchar_t *time_line = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * 16 );
 
 	SYSTEMTIME st;
 	FILETIME ft;
-	ft.dwLowDateTime = fi->time.LowPart;
-	ft.dwHighDateTime = fi->time.HighPart;
+	ft.dwLowDateTime = di->time.LowPart;
+	ft.dwHighDateTime = di->time.HighPart;
 	
 	FileTimeToSystemTime( &ft, &st );
 	if ( cfg_popup_time_format == 0 )	// 12 hour
@@ -1119,129 +1074,70 @@ void CreatePopup( displayinfo *fi )
 	shared_settings->popup_background_color2 = cfg_popup_background_color2;
 	shared_settings->popup_time = cfg_popup_time;
 
-	if ( cfg_popup_show_contact_picture && fi->contact_info != NULL )
+	if ( cfg_popup_show_contact_picture && di->ci != NULL )
 	{
-		shared_settings->contact_picture_info.picture_path = fi->contact_info->picture_path;	// We don't want to free this.
+		shared_settings->contact_picture_info.picture_path = di->ci->picture_path;	// We don't want to free this.
 	}
 
 	// Use the default sound if the contact doesn't have a custom ringtone set.
 	if ( cfg_popup_enable_ringtones )
 	{
-		if ( fi->contact_info != NULL && fi->contact_info->ringtone_info != NULL )
+		if ( di->ci != NULL && di->ci->rti != NULL )
 		{
-			shared_settings->ringtone_info = fi->contact_info->ringtone_info;
+			shared_settings->rti = di->ci->rti;
 		}
 		else
 		{
-			shared_settings->ringtone_info = default_ringtone;
+			shared_settings->rti = default_ringtone;
 		}
 	}
+
+	DoublyLinkedList *t_ll = NULL;
 
 	LOGFONT lf;
 	_memzero( &lf, sizeof( LOGFONT ) );
 
-	POPUP_SETTINGS *ls1 = ( POPUP_SETTINGS * )GlobalAlloc( GMEM_FIXED, sizeof( POPUP_SETTINGS ) );
-	ls1->shared_settings = shared_settings;
-	ls1->window_settings.drag_position.x = 0;
-	ls1->window_settings.drag_position.y = 0;
-	ls1->window_settings.window_position.x = 0;
-	ls1->window_settings.window_position.y = 0;
-	ls1->window_settings.is_dragging = false;
-	ls1->popup_line_order = cfg_popup_line_order1;
-	ls1->popup_justify = cfg_popup_justify_line1;
-	ls1->font_color = cfg_popup_font_color1;
-	ls1->font_shadow = cfg_popup_font_shadow1;
-	ls1->font_shadow_color = cfg_popup_font_shadow_color1;
-	ls1->font_face = NULL;
-	ls1->line_text = ( _abs( cfg_popup_line_order1 ) == LINE_TIME ? time_line : ( _abs( cfg_popup_line_order1 ) == LINE_CALLER_ID ? caller_id_line : phone_line ) );
+	for ( char i = 0; i < 3; ++i )
+	{
+		POPUP_SETTINGS *ls = ( POPUP_SETTINGS * )GlobalAlloc( GMEM_FIXED, sizeof( POPUP_SETTINGS ) );
+		ls->shared_settings = shared_settings;
+		ls->window_settings.drag_position.x = 0;
+		ls->window_settings.drag_position.y = 0;
+		ls->window_settings.window_position.x = 0;
+		ls->window_settings.window_position.y = 0;
+		ls->window_settings.is_dragging = false;
+		_memcpy_s( &ls->popup_info, sizeof( POPUP_INFO ), g_popup_info[ i ], sizeof( POPUP_INFO ) );
+		ls->popup_info.font_face = NULL;
+		ls->line_text = ( _abs( g_popup_info[ i ]->line_order ) == LINE_TIME ? time_line : ( _abs( g_popup_info[ i ]->line_order ) == LINE_CALLER_ID ? caller_id_line : phone_line ) );
 
-	if ( cfg_popup_font_face1 != NULL )
-	{
-		_wcsncpy_s( lf.lfFaceName, LF_FACESIZE, cfg_popup_font_face1, LF_FACESIZE );
-		lf.lfFaceName[ LF_FACESIZE - 1 ] = 0;	// Sanity.
-		lf.lfHeight = cfg_popup_font_height1;
-		lf.lfWeight = cfg_popup_font_weight1;
-		lf.lfItalic = cfg_popup_font_italic1;
-		lf.lfUnderline = cfg_popup_font_underline1;
-		lf.lfStrikeOut = cfg_popup_font_strikeout1;
-		ls1->font = _CreateFontIndirectW( &lf );
-	}
-	else
-	{
-		ls1->font = NULL;
-	}
+		if ( g_popup_info[ i ]->font_face != NULL )
+		{
+			_wcsncpy_s( lf.lfFaceName, LF_FACESIZE, g_popup_info[ i ]->font_face, LF_FACESIZE );
+			lf.lfFaceName[ LF_FACESIZE - 1 ] = 0;	// Sanity.
+			lf.lfHeight = g_popup_info[ i ]->font_height;
+			lf.lfWeight = g_popup_info[ i ]->font_weight;
+			lf.lfItalic = g_popup_info[ i ]->font_italic;
+			lf.lfUnderline = g_popup_info[ i ]->font_underline;
+			lf.lfStrikeOut = g_popup_info[ i ]->font_strikeout;
+			ls->font = _CreateFontIndirectW( &lf );
+		}
+		else
+		{
+			ls->font = NULL;
+		}
 
-	POPUP_SETTINGS *ls2 = ( POPUP_SETTINGS * )GlobalAlloc( GMEM_FIXED, sizeof( POPUP_SETTINGS ) );
-	ls2->shared_settings = shared_settings;
-	ls2->window_settings.drag_position.x = 0;
-	ls2->window_settings.drag_position.y = 0;
-	ls2->window_settings.window_position.x = 0;
-	ls2->window_settings.window_position.y = 0;
-	ls2->window_settings.is_dragging = false;
-	ls2->popup_line_order = cfg_popup_line_order2;
-	ls2->popup_justify = cfg_popup_justify_line2;
-	ls2->font_color = cfg_popup_font_color2;
-	ls2->font_shadow = cfg_popup_font_shadow2;
-	ls2->font_shadow_color = cfg_popup_font_shadow_color2;
-	ls2->font_face = NULL;
-	ls2->line_text = ( _abs( cfg_popup_line_order2 ) == LINE_TIME ? time_line : ( _abs( cfg_popup_line_order2 ) == LINE_CALLER_ID ? caller_id_line : phone_line ) );
-
-	if ( cfg_popup_font_face2 != NULL )
-	{
-		_wcsncpy_s( lf.lfFaceName, LF_FACESIZE, cfg_popup_font_face2, LF_FACESIZE );
-		lf.lfFaceName[ LF_FACESIZE - 1 ] = 0;	// Sanity.
-		lf.lfHeight = cfg_popup_font_height2;
-		lf.lfWeight = cfg_popup_font_weight2;
-		lf.lfItalic = cfg_popup_font_italic2;
-		lf.lfUnderline = cfg_popup_font_underline2;
-		lf.lfStrikeOut = cfg_popup_font_strikeout2;
-		ls2->font = _CreateFontIndirectW( &lf );
-	}
-	else
-	{
-		ls2->font = NULL;
+		if ( t_ll == NULL )
+		{
+			t_ll = DLL_CreateNode( ( void * )ls );
+		}
+		else
+		{
+			DoublyLinkedList *ll = DLL_CreateNode( ( void * )ls );
+			DLL_AddNode( &t_ll, ll, -1 );
+		}
 	}
 
-	POPUP_SETTINGS *ls3 = ( POPUP_SETTINGS * )GlobalAlloc( GMEM_FIXED, sizeof( POPUP_SETTINGS ) );
-	ls3->shared_settings = shared_settings;
-	ls3->window_settings.drag_position.x = 0;
-	ls3->window_settings.drag_position.y = 0;
-	ls3->window_settings.window_position.x = 0;
-	ls3->window_settings.window_position.y = 0;
-	ls3->window_settings.is_dragging = false;
-	ls3->popup_line_order = cfg_popup_line_order3;
-	ls3->popup_justify = cfg_popup_justify_line3;
-	ls3->font_color = cfg_popup_font_color3;
-	ls3->font_shadow = cfg_popup_font_shadow3;
-	ls3->font_shadow_color = cfg_popup_font_shadow_color3;
-	ls3->font_face = NULL;
-	ls3->line_text = ( _abs( cfg_popup_line_order3 ) == LINE_TIME ? time_line : ( _abs( cfg_popup_line_order3 ) == LINE_CALLER_ID ? caller_id_line : phone_line ) );
-
-	if ( cfg_popup_font_face3 != NULL )
-	{
-		_wcsncpy_s( lf.lfFaceName, LF_FACESIZE, cfg_popup_font_face3, LF_FACESIZE );
-		lf.lfFaceName[ LF_FACESIZE - 1 ] = 0;	// Sanity.
-		lf.lfHeight = cfg_popup_font_height3;
-		lf.lfWeight = cfg_popup_font_weight3;
-		lf.lfItalic = cfg_popup_font_italic3;
-		lf.lfUnderline = cfg_popup_font_underline3;
-		lf.lfStrikeOut = cfg_popup_font_strikeout3;
-		ls3->font = _CreateFontIndirectW( &lf );
-	}
-	else
-	{
-		ls3->font = NULL;
-	}
-
-	DoublyLinkedList *t_ll = DLL_CreateNode( ( void * )ls1 );
-
-	DoublyLinkedList *ll = DLL_CreateNode( ( void * )ls2 );
-	DLL_AddNode( &t_ll, ll, -1 );
-
-	ll = DLL_CreateNode( ( void * )ls3 );
-	DLL_AddNode( &t_ll, ll, -1 );
-
-	_SetWindowLongW( hWnd_popup, 0, ( LONG_PTR )t_ll );
+	_SetWindowLongPtrW( hWnd_popup, 0, ( LONG_PTR )t_ll );
 
 	_SendMessageW( hWnd_popup, WM_PROPAGATE, 0, 0 );
 }
@@ -1250,18 +1146,15 @@ void Processing_Window( HWND hWnd, bool enable )
 {
 	if ( !enable )
 	{
-		//_SetWindowTextW( g_hWnd_main, L"VZ Enhanced 56K - Please wait..." );	// Update the window title.
-		_EnableWindow( hWnd, FALSE );										// Prevent any interaction with the listview while we're processing.
-		_SendMessageW( g_hWnd_main, WM_CHANGE_CURSOR, TRUE, 0 );			// SetCursor only works from the main thread. Set it to an arrow with hourglass.
-		UpdateMenus( UM_DISABLE );											// Disable all processing menu items.
+		_SendMessageW( g_hWnd_main, WM_CHANGE_CURSOR, TRUE, 0 );	// SetCursor only works from the main thread. Set it to an arrow with hourglass.
+		UpdateMenus( UM_DISABLE );									// Disable all processing menu items.
 	}
 	else
 	{
 		UpdateMenus( UM_ENABLE );									// Enable the appropriate menu items.
 		_SendMessageW( g_hWnd_main, WM_CHANGE_CURSOR, FALSE, 0 );	// Reset the cursor.
-		_EnableWindow( hWnd, TRUE );								// Allow the listview to be interactive. Also forces a refresh to update the item count column.
+		_InvalidateRect( hWnd, NULL, FALSE );						// Refresh the number column values.
 		_SetFocus( hWnd );											// Give focus back to the listview to allow shortcut keys.
-		//_SetWindowTextW( g_hWnd_main, PROGRAM_CAPTION );			// Reset the window title.
 	}
 }
 
@@ -1299,74 +1192,110 @@ THREAD_RETURN cleanup( void *pArguments )
 }
 
 // Returns the first match after counting the number of total keyword matches.
-ignorecidinfo *find_ignore_caller_id_name_match( displayinfo *di )
+allow_ignore_cid_info *find_caller_id_name_match( display_info *di, dllrbt_tree *list, unsigned char list_type )
 {
 	if ( di == NULL )
 	{
 		return NULL;
 	}
 
-	ignorecidinfo *ret_icidi = NULL;
+	allow_ignore_cid_info *ret_aicidi = NULL;
+
+	int caller_id_length = lstrlenW( di->caller_id );
+
+	unsigned int *cid_match_count = ( list_type == LIST_TYPE_ALLOW ? &di->allow_cid_match_count : &di->ignore_cid_match_count );
 
 	// Find a keyword that matches the value.
-	node_type *node = dllrbt_get_head( ignore_cid_list );
+	node_type *node = dllrbt_get_head( list );
 	while ( node != NULL )
 	{
-		ignorecidinfo *icidi = ( ignorecidinfo * )node->val;
-		
-		if ( icidi->match_case && icidi->match_whole_word )
+		allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )node->val;
+
+		if ( aicidi->match_flag & 0x04 )
 		{
-			if ( lstrcmpA( di->ci.caller_id, icidi->c_caller_id ) == 0 )
+			int error_code;
+			size_t error_offset;
+
+			if ( g_use_regular_expressions )
 			{
-				++( di->ignore_cid_match_count );
-
-				icidi->active = true;
-
-				if ( ret_icidi == NULL )
+				pcre2_code *regex_code = _pcre2_compile_16( ( PCRE2_SPTR16 )aicidi->caller_id, PCRE2_ZERO_TERMINATED, 0, &error_code, &error_offset, NULL );
+				if ( regex_code != NULL )
 				{
-					ret_icidi = icidi;
+					pcre2_match_data *regex_match_data = _pcre2_match_data_create_from_pattern_16( regex_code, NULL );
+					if ( regex_match_data != NULL )
+					{
+						if ( _pcre2_match_16( regex_code, ( PCRE2_SPTR16 )di->caller_id, caller_id_length, 0, 0, regex_match_data, NULL ) >= 0 )
+						{
+							++( *cid_match_count );
+
+							aicidi->active = true;
+
+							if ( ret_aicidi == NULL )
+							{
+								ret_aicidi = aicidi;
+							}
+						}
+
+						_pcre2_match_data_free_16( regex_match_data );
+					}
+
+					_pcre2_code_free_16( regex_code );
 				}
 			}
 		}
-		else if ( !icidi->match_case && icidi->match_whole_word )
+		else if ( ( aicidi->match_flag & 0x02 ) && ( aicidi->match_flag & 0x01 ) )
 		{
-			if ( lstrcmpiA( di->ci.caller_id, icidi->c_caller_id ) == 0 )
+			if ( lstrcmpW( di->caller_id, aicidi->caller_id ) == 0 )
 			{
-				++( di->ignore_cid_match_count );
+				++( *cid_match_count );
 
-				icidi->active = true;
+				aicidi->active = true;
 
-				if ( ret_icidi == NULL )
+				if ( ret_aicidi == NULL )
 				{
-					ret_icidi = icidi;
+					ret_aicidi = aicidi;
 				}
 			}
 		}
-		else if ( icidi->match_case && !icidi->match_whole_word )
+		else if ( !( aicidi->match_flag & 0x02 ) && ( aicidi->match_flag & 0x01 ) )
 		{
-			if ( _StrStrA( di->ci.caller_id, icidi->c_caller_id ) != NULL )
+			if ( lstrcmpiW( di->caller_id, aicidi->caller_id ) == 0 )
 			{
-				++( di->ignore_cid_match_count );
+				++( *cid_match_count );
 
-				icidi->active = true;
+				aicidi->active = true;
 
-				if ( ret_icidi == NULL )
+				if ( ret_aicidi == NULL )
 				{
-					ret_icidi = icidi;
+					ret_aicidi = aicidi;
 				}
 			}
 		}
-		else if ( !icidi->match_case && !icidi->match_whole_word )
+		else if ( ( aicidi->match_flag & 0x02 ) && !( aicidi->match_flag & 0x01 ) )
 		{
-			if ( _StrStrIA( di->ci.caller_id, icidi->c_caller_id ) != NULL )
+			if ( _StrStrW( di->caller_id, aicidi->caller_id ) != NULL )
 			{
-				++( di->ignore_cid_match_count );
+				++( *cid_match_count );
 
-				icidi->active = true;
+				aicidi->active = true;
 
-				if ( ret_icidi == NULL )
+				if ( ret_aicidi == NULL )
 				{
-					ret_icidi = icidi;
+					ret_aicidi = aicidi;
+				}
+			}
+		}
+		else if ( !( aicidi->match_flag & 0x02 ) && !( aicidi->match_flag & 0x01 ) )
+		{
+			if ( _StrStrIW( di->caller_id, aicidi->caller_id ) != NULL )
+			{
+				++( *cid_match_count );
+
+				aicidi->active = true;
+
+				if ( ret_aicidi == NULL )
+				{
+					ret_aicidi = aicidi;
 				}
 			}
 		}
@@ -1374,15 +1303,15 @@ ignorecidinfo *find_ignore_caller_id_name_match( displayinfo *di )
 		node = node->next;
 	}
 
-	return ret_icidi;
+	return ret_aicidi;
 }
 
-char *combine_names( char *first_name, char *last_name )
+wchar_t *combine_names_w( wchar_t *first_name, wchar_t *last_name )
 {
 	int first_name_length = 0;
 	int last_name_length = 0;
 	int combined_name_length = 0;
-	char *combined_name = NULL;
+	wchar_t *combined_name = NULL;
 
 	if ( first_name == NULL && last_name == NULL )
 	{
@@ -1390,21 +1319,21 @@ char *combine_names( char *first_name, char *last_name )
 	}
 	else if ( first_name != NULL && last_name == NULL )
 	{
-		return GlobalStrDupA( first_name );
+		return GlobalStrDupW( first_name );
 	}
 	else if ( first_name == NULL && last_name != NULL )
 	{
-		return GlobalStrDupA( last_name );
+		return GlobalStrDupW( last_name );
 	}
 
-	first_name_length = lstrlenA( first_name );
-	last_name_length = lstrlenA( last_name );
+	first_name_length = lstrlenW( first_name );
+	last_name_length = lstrlenW( last_name );
 
 	combined_name_length = first_name_length + last_name_length + 1 + 1;
-	combined_name = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * combined_name_length );
-	_memcpy_s( combined_name, combined_name_length, first_name, first_name_length );
-	combined_name[ first_name_length ] = ' ';
-	_memcpy_s( combined_name + first_name_length + 1, combined_name_length - ( first_name_length + 1 ), last_name, last_name_length );
+	combined_name = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * combined_name_length );
+	_wmemcpy_s( combined_name, combined_name_length, first_name, first_name_length );
+	combined_name[ first_name_length ] = L' ';
+	_wmemcpy_s( combined_name + first_name_length + 1, combined_name_length - ( first_name_length + 1 ), last_name, last_name_length );
 	combined_name[ combined_name_length - 1 ] = 0;	// Sanity.
 
 	return combined_name;
@@ -1443,7 +1372,7 @@ void cleanup_custom_caller_id()
 	}
 }
 
-char *get_custom_caller_id( char *phone_number, contactinfo **ci )
+wchar_t *get_custom_caller_id_w( wchar_t *phone_number, contact_info **ci )
 {
 	*ci = NULL;
 
@@ -1456,36 +1385,36 @@ char *get_custom_caller_id( char *phone_number, contactinfo **ci )
 			dll = ( DoublyLinkedList * )dllrbt_find( custom_cid_list[ i ], ( void * )phone_number, true );
 			while ( dll != NULL )
 			{
-				*ci = ( contactinfo * )dll->data;
+				*ci = ( contact_info * )dll->data;
 
 				if ( *ci != NULL )
 				{
 					// If there are multiple people with the same office phone number, then use the business name to identify them.
 					if ( ( i == 2 && dll->prev != NULL ) || i == 3 )
 					{
-						if ( ( *ci )->contact.business_name != NULL && ( *ci )->contact.business_name[ 0 ] != NULL )
+						if ( ( *ci )->w_business_name != NULL && ( *ci )->w_business_name[ 0 ] != NULL )
 						{
-							return GlobalStrDupA( ( *ci )->contact.business_name );
+							return GlobalStrDupW( ( *ci )->w_business_name );
 						}
 					}
 					else
 					{
 						// See if there's a first name available.
-						if ( ( *ci )->contact.first_name != NULL && ( *ci )->contact.first_name[ 0 ] != NULL )
+						if ( ( *ci )->w_first_name != NULL && ( *ci )->w_first_name[ 0 ] != NULL )
 						{
 							// See if there's a last name available.
-							if ( ( *ci )->contact.last_name != NULL && ( *ci )->contact.last_name[ 0 ] != NULL )
+							if ( ( *ci )->w_last_name != NULL && ( *ci )->w_last_name[ 0 ] != NULL )
 							{
-								return combine_names( ( *ci )->contact.first_name, ( *ci )->contact.last_name );
+								return combine_names_w( ( *ci )->w_first_name, ( *ci )->w_last_name );
 							}
 							else	// If there's no last name, then use the first name.
 							{
-								return GlobalStrDupA( ( *ci )->contact.first_name );
+								return GlobalStrDupW( ( *ci )->w_first_name );
 							}
 						}
-						else if ( ( *ci )->contact.nickname != NULL && ( *ci )->contact.nickname[ 0 ] != NULL )	// If there's no first name, then try the nickname.
+						else if ( ( *ci )->w_nickname != NULL && ( *ci )->w_nickname[ 0 ] != NULL )	// If there's no first name, then try the nickname.
 						{
-							return GlobalStrDupA( ( *ci )->contact.nickname );
+							return GlobalStrDupW( ( *ci )->w_nickname );
 						}
 					}
 				}
@@ -1498,25 +1427,25 @@ char *get_custom_caller_id( char *phone_number, contactinfo **ci )
 	return NULL;
 }
 
-void remove_custom_caller_id( contactinfo *ci )
+void remove_custom_caller_id_w( contact_info *ci )
 {
 	if ( ci == NULL || custom_cid_list == NULL )
 	{
 		return;
 	}
 
-	char *phone_number = NULL;
+	wchar_t *phone_number = NULL;
 
 	for ( char i = 0; i < CID_LIST_COUNT; ++i )
 	{
 		switch ( i )
 		{
-			case 0: { phone_number = ci->contact.home_phone_number; } break;
-			case 1: { phone_number = ci->contact.cell_phone_number; } break;
-			case 2: { phone_number = ci->contact.office_phone_number; } break;
-			case 3: { phone_number = ci->contact.work_phone_number; } break;
-			case 4: { phone_number = ci->contact.other_phone_number; } break;
-			case 5: { phone_number = ci->contact.fax_number; } break;
+			case 0: { phone_number = ci->home_phone_number; } break;
+			case 1: { phone_number = ci->cell_phone_number; } break;
+			case 2: { phone_number = ci->office_phone_number; } break;
+			case 3: { phone_number = ci->work_phone_number; } break;
+			case 4: { phone_number = ci->other_phone_number; } break;
+			case 5: { phone_number = ci->fax_number; } break;
 		}
 
 		// Skip blank phone numbers.
@@ -1536,7 +1465,7 @@ void remove_custom_caller_id( contactinfo *ci )
 			DoublyLinkedList *current_node = ll;
 			while ( current_node != NULL )
 			{
-				if ( ( contactinfo * )current_node->data == ci )
+				if ( ( contact_info * )current_node->data == ci )
 				{
 					DLL_RemoveNode( &ll, current_node );
 					GlobalFree( current_node );
@@ -1548,12 +1477,12 @@ void remove_custom_caller_id( contactinfo *ci )
 
 						switch ( i )
 						{
-							case 0: { ( ( node_type * )itr )->key = ( void * )( ( contactinfo * )ll->data )->contact.home_phone_number; } break;
-							case 1: { ( ( node_type * )itr )->key = ( void * )( ( contactinfo * )ll->data )->contact.cell_phone_number; } break;
-							case 2: { ( ( node_type * )itr )->key = ( void * )( ( contactinfo * )ll->data )->contact.office_phone_number; } break;
-							case 3: { ( ( node_type * )itr )->key = ( void * )( ( contactinfo * )ll->data )->contact.work_phone_number; } break;
-							case 4: { ( ( node_type * )itr )->key = ( void * )( ( contactinfo * )ll->data )->contact.other_phone_number; } break;
-							case 5: { ( ( node_type * )itr )->key = ( void * )( ( contactinfo * )ll->data )->contact.fax_number; } break;
+							case 0: { ( ( node_type * )itr )->key = ( void * )( ( contact_info * )ll->data )->home_phone_number; } break;
+							case 1: { ( ( node_type * )itr )->key = ( void * )( ( contact_info * )ll->data )->cell_phone_number; } break;
+							case 2: { ( ( node_type * )itr )->key = ( void * )( ( contact_info * )ll->data )->office_phone_number; } break;
+							case 3: { ( ( node_type * )itr )->key = ( void * )( ( contact_info * )ll->data )->work_phone_number; } break;
+							case 4: { ( ( node_type * )itr )->key = ( void * )( ( contact_info * )ll->data )->other_phone_number; } break;
+							case 5: { ( ( node_type * )itr )->key = ( void * )( ( contact_info * )ll->data )->fax_number; } break;
 						}
 					}
 
@@ -1572,14 +1501,14 @@ void remove_custom_caller_id( contactinfo *ci )
 	}
 }
 
-void add_custom_caller_id( contactinfo *ci )
+void add_custom_caller_id_w( contact_info *ci )
 {
 	if ( ci == NULL )
 	{
 		return;
 	}
 
-	char *phone_number = NULL;
+	wchar_t *phone_number = NULL;
 
 	if ( custom_cid_list == NULL )
 	{
@@ -1590,17 +1519,17 @@ void add_custom_caller_id( contactinfo *ci )
 	{
 		if ( custom_cid_list[ i ] == NULL )
 		{
-			 custom_cid_list[ i ] = dllrbt_create( dllrbt_compare_a );
+			 custom_cid_list[ i ] = dllrbt_create( dllrbt_compare_w );
 		}
 
 		switch ( i )
 		{
-			case 0: { phone_number = ci->contact.home_phone_number; } break;
-			case 1: { phone_number = ci->contact.cell_phone_number; } break;
-			case 2: { phone_number = ci->contact.office_phone_number; } break;
-			case 3: { phone_number = ci->contact.work_phone_number; } break;
-			case 4: { phone_number = ci->contact.other_phone_number; } break;
-			case 5: { phone_number = ci->contact.fax_number; } break;
+			case 0: { phone_number = ci->home_phone_number; } break;
+			case 1: { phone_number = ci->cell_phone_number; } break;
+			case 2: { phone_number = ci->office_phone_number; } break;
+			case 3: { phone_number = ci->work_phone_number; } break;
+			case 4: { phone_number = ci->other_phone_number; } break;
+			case 5: { phone_number = ci->fax_number; } break;
 		}
 
 		// Skip blank phone numbers.
@@ -1629,40 +1558,40 @@ void add_custom_caller_id( contactinfo *ci )
 	}
 }
 
-wchar_t *FormatPhoneNumber( char *phone_number )
+wchar_t *FormatPhoneNumberW( wchar_t *phone_number )
 {
 	wchar_t *val = NULL;
 
 	if ( phone_number != NULL )
 	{
-		int val_length = MultiByteToWideChar( CP_UTF8, 0, phone_number, -1, NULL, 0 );	// Include the NULL terminator.
+		int val_length = lstrlenW( phone_number ) + 1;	// Include the NULL terminator.
 
-		if ( is_num( phone_number ) >= 0 )
+		if ( is_num_w( phone_number ) >= 0 )
 		{
 			if ( val_length == 11 )	// 10 digit phone number + 1 NULL character. (555) 555-1234
 			{
 				val = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * ( val_length + 4 ) );
-				MultiByteToWideChar( CP_UTF8, 0, phone_number, -1, val + 4, val_length );
 
 				val[ 0 ] = L'(';
-				_wmemcpy_s( val + 1, 14, val + 4, 3 );
+				_wmemcpy_s( val + 1, 14, phone_number, 3 );
 				val[ 4 ] = L')';
 				val[ 5 ] = L' ';
-				_wmemcpy_s( val + 6, 9, val + 7, 3 );
+				_wmemcpy_s( val + 6, 9, phone_number + 3, 3 );
 				val[ 9 ] = L'-';
+				_wmemcpy_s( val + 10, 5, phone_number + 6, 4 );
 				val[ 14 ] = 0;	// Sanity
 			}
-			else if ( val_length == 12 && phone_number[ 0 ] == '1' )	// 11 digit phone number + 1 NULL character. 1-555-555-1234
+			else if ( val_length == 12 && phone_number[ 0 ] == L'1' )	// 11 digit phone number + 1 NULL character. 1-555-555-1234
 			{
 				val = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * ( val_length + 3 ) );
-				MultiByteToWideChar( CP_UTF8, 0, phone_number, -1, val + 3, val_length );
 
-				val[ 0 ] = *( val + 3 );
+				val[ 0 ] = phone_number[ 0 ];
 				val[ 1 ] = L'-';
-				_wmemcpy_s( val + 2, 13, val + 4, 3 );
+				_wmemcpy_s( val + 2, 13, phone_number + 1, 3 );
 				val[ 5 ] = L'-';
-				_wmemcpy_s( val + 6, 9, val + 7, 3 );
+				_wmemcpy_s( val + 6, 9, phone_number + 4, 3 );
 				val[ 9 ] = L'-';
+				_wmemcpy_s( val + 10, 5, phone_number + 7, 4 );
 				val[ 14 ] = 0;	// Sanity
 			}
 		}
@@ -1670,55 +1599,11 @@ wchar_t *FormatPhoneNumber( char *phone_number )
 		if ( val == NULL )	// Number has some weird length, is unavailable, unknown, etc.
 		{
 			val = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * val_length );
-			MultiByteToWideChar( CP_UTF8, 0, phone_number, -1, val, val_length );
+			_wmemcpy_s( val, val_length, phone_number, val_length );
 		}
 	}
 
 	return val;
-}
-
-void FormatDisplayInfo( displayinfo *di )
-{
-	wchar_t *val = NULL;
-	int val_length = 0;
-
-	// Phone
-	di->phone_number = FormatPhoneNumber( di->ci.call_from );
-
-	// Caller ID
-	if ( di->ci.caller_id != NULL )
-	{
-		val_length = MultiByteToWideChar( CP_UTF8, 0, di->ci.caller_id, -1, NULL, 0 );	// Include the NULL terminator.
-		val = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * val_length );
-		MultiByteToWideChar( CP_UTF8, 0, di->ci.caller_id, -1, val, val_length );
-
-		di->caller_id = val;
-		val = NULL;
-	}
-
-	SYSTEMTIME st;
-	FILETIME ft;
-	ft.dwLowDateTime = di->time.LowPart;
-	ft.dwHighDateTime = di->time.HighPart;
-
-	FileTimeToSystemTime( &ft, &st );
-
-	int buffer_length = 0;
-
-	#ifndef NTDLL_USE_STATIC_LIB
-		//buffer_length = 64;	// Should be enough to hold most translated values.
-		buffer_length = __snwprintf( NULL, 0, L"%s, %s %d, %04d %d:%02d:%02d %s", GetDay( st.wDayOfWeek ), GetMonth( st.wMonth ), st.wDay, st.wYear, ( st.wHour > 12 ? st.wHour - 12 : ( st.wHour != 0 ? st.wHour : 12 ) ), st.wMinute, st.wSecond, ( st.wHour >= 12 ? L"PM" : L"AM" ) ) + 1;	// Include the NULL character.
-	#else
-		buffer_length = _scwprintf( L"%s, %s %d, %04d %d:%02d:%02d %s", GetDay( st.wDayOfWeek ), GetMonth( st.wMonth ), st.wDay, st.wYear, ( st.wHour > 12 ? st.wHour - 12 : ( st.wHour != 0 ? st.wHour : 12 ) ), st.wMinute, st.wSecond, ( st.wHour >= 12 ? L"PM" : L"AM" ) ) + 1;	// Include the NULL character.
-	#endif
-
-	di->w_time = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * buffer_length );
-
-	__snwprintf( di->w_time, buffer_length, L"%s, %s %d, %04d %d:%02d:%02d %s", GetDay( st.wDayOfWeek ), GetMonth( st.wMonth ), st.wDay, st.wYear, ( st.wHour > 12 ? st.wHour - 12 : ( st.wHour != 0 ? st.wHour : 12 ) ), st.wMinute, st.wSecond, ( st.wHour >= 12 ? L"PM" : L"AM" ) );
-
-	di->w_ignore_phone_number = ( di->ignore_phone_number ? GlobalStrDupW( ST_Yes ) : GlobalStrDupW( ST_No ) );
-
-	di->w_ignore_caller_id = ( di->ignore_cid_match_count > 0 ? GlobalStrDupW( ST_Yes ) : GlobalStrDupW( ST_No ) );
 }
 
 // Allocates a new string if characters need escaping. Otherwise, it returns NULL.

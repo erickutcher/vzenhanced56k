@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -36,8 +36,8 @@
 	#define _lineGetDevCapsW	lineGetDevCapsW
 	#define _lineOpenW			lineOpenW
 	#define _lineGetMessage		lineGetMessage
-	#define _lineGetCallInfoA	lineGetCallInfoA
-	//#define _lineGetCallInfoW	lineGetCallInfoW
+	//#define _lineGetCallInfoA	lineGetCallInfoA
+	#define _lineGetCallInfoW	lineGetCallInfoW
 	#define _lineAnswer			lineAnswer
 	#define _lineDrop			lineDrop
 	#define _lineDeallocateCall	lineDeallocateCall
@@ -60,8 +60,8 @@
 	typedef LONG ( WINAPI *plineGetDevCapsW )( HLINEAPP hLineApp, DWORD dwDeviceID, DWORD dwAPIVersion, DWORD dwExtVersion, LPLINEDEVCAPS lpLineDevCaps );
 	typedef LONG ( WINAPI *plineOpenW )( HLINEAPP hLineApp, DWORD dwDeviceID, LPHLINE lphLine, DWORD dwAPIVersion, DWORD dwExtVersion, DWORD_PTR dwCallbackInstance, DWORD dwPrivileges, DWORD dwMediaModes, LPLINECALLPARAMS const lpCallParams );
 	typedef LONG ( WINAPI *plineGetMessage )( HLINEAPP hLineApp, LPLINEMESSAGE lpMessage, DWORD dwTimeout );
-	typedef LONG ( WINAPI *plineGetCallInfoA )( HCALL hCall, LPLINECALLINFO lpCallInfo );
-	//typedef LONG ( WINAPI *plineGetCallInfoW )( HCALL hCall, LPLINECALLINFO lpCallInfo );
+	//typedef LONG ( WINAPI *plineGetCallInfoA )( HCALL hCall, LPLINECALLINFO lpCallInfo );
+	typedef LONG ( WINAPI *plineGetCallInfoW )( HCALL hCall, LPLINECALLINFO lpCallInfo );
 	typedef LONG ( WINAPI *plineAnswer )( HCALL hCall, LPCSTR lpsUserUserInfo, DWORD dwSize );
 	typedef LONG ( WINAPI *plineDrop )( HCALL hCall, LPCSTR lpsUserUserInfo, DWORD dwSize );
 	typedef LONG ( WINAPI *plineDeallocateCall )( HCALL hCall );
@@ -79,8 +79,8 @@
 	extern plineGetDevCapsW		_lineGetDevCapsW;
 	extern plineOpenW			_lineOpenW;
 	extern plineGetMessage		_lineGetMessage;
-	extern plineGetCallInfoA	_lineGetCallInfoA;
-	//extern plineGetCallInfoW	_lineGetCallInfoW;
+	//extern plineGetCallInfoA	_lineGetCallInfoA;
+	extern plineGetCallInfoW	_lineGetCallInfoW;
 	extern plineAnswer			_lineAnswer;
 	extern plineDrop			_lineDrop;
 	extern plineDeallocateCall	_lineDeallocateCall;

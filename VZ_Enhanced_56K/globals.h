@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -47,8 +47,8 @@
 
 #define HOME_PAGE			L"https://erickutcher.github.io/#VZ_Enhanced_56K"
 
-#define MIN_WIDTH			480
-#define MIN_HEIGHT			320
+#define MIN_WIDTH			640
+#define MIN_HEIGHT			480
 
 #define MAX_POPUP_TIME		300		// Maximum time in seconds that the popup window can be shown.
 #define SNAP_WIDTH			10		// The minimum distance at which our windows will attach together.
@@ -74,12 +74,17 @@
 #define LINE_PHONE			3
 #define TOTAL_LINES			3
 
-#define NUM_TABS			3
+#define NUM_TABS			4
 
-#define NUM_COLUMNS1		6
-#define NUM_COLUMNS2		17
-#define NUM_COLUMNS3		3
-#define NUM_COLUMNS4		5
+#define NUM_COLUMNS1		4
+#define NUM_COLUMNS2		7
+#define NUM_COLUMNS3		8
+#define NUM_COLUMNS4		17
+#define NUM_COLUMNS5		4
+#define NUM_COLUMNS6		7
+
+#define LIST_TYPE_ALLOW		0
+#define LIST_TYPE_IGNORE	1
 
 #define _wcsicmp_s( a, b ) ( ( a == NULL && b == NULL ) ? 0 : ( a != NULL && b == NULL ) ? 1 : ( a == NULL && b != NULL ) ? -1 : lstrcmpiW( a, b ) )
 #define _stricmp_s( a, b ) ( ( a == NULL && b == NULL ) ? 0 : ( a != NULL && b == NULL ) ? 1 : ( a == NULL && b != NULL ) ? -1 : lstrcmpiA( a, b ) )
@@ -92,231 +97,224 @@
 
 #define is_close( a, b ) ( _abs( a - b ) < SNAP_WIDTH )
 
+#define is_digit_w( c ) ( c - L'0' + 0U <= 9U )
 #define is_digit( c ) ( c - '0' + 0U <= 9U )
 
 #define GET_X_LPARAM( lp )	( ( int )( short )LOWORD( lp ) )
 #define GET_Y_LPARAM( lp )	( ( int )( short )HIWORD( lp ) )
 
-struct contactinfo;
-struct ignoreinfo;
+struct contact_info;
+struct allow_ignore_info;
 
-struct modeminfo
+struct modem_info
 {
 	GUID permanent_line_guid;
 	wchar_t *line_name;
 	DWORD device_id;
 };
 
-struct ringtoneinfo
+struct ringtone_info
 {
 	wchar_t *ringtone_path;
 	wchar_t *ringtone_file;
 };
 
-struct playback_info
+struct display_info
 {
-	ringtoneinfo *rti;
-	DWORD device_id;
-};
-
-struct callerinfo
-{
-	char *call_from;
-	char *caller_id;
-
-	bool ignored;			// The phone number has been ignored
-};
-
-struct displayinfo
-{
-	union
-	{
-		struct	// Keep these in alphabetical order.
-		{
-			wchar_t *caller_id;					// Caller ID
-			wchar_t *w_time;					// Date and Time
-			wchar_t *w_ignore_caller_id;		// Ignore Caller ID
-			wchar_t *w_ignore_phone_number;		// Ignore Phone Number
-			wchar_t *phone_number;				// Phone Number
-		};
-
-		wchar_t *display_values[ 5 ];
-	};
-
-	callerinfo ci;
-
 	ULARGE_INTEGER time;
 
-	contactinfo *contact_info;
+	contact_info *ci;
+
+	wchar_t *caller_id;					// Caller ID
+	wchar_t *w_time;					// Date and Time
+	wchar_t *w_phone_number;			// Phone Number
+
+	wchar_t *phone_number;				// The incoming phone number. Unformatted.
+	wchar_t *custom_caller_id;
 
 	HCALL incoming_call;
 
+	unsigned int allow_cid_match_count;		// Number of allow cid matches.
 	unsigned int ignore_cid_match_count;	// Number of ignore cid matches.
 
-	bool ignore_phone_number;		// phone number is in ignore_list
+	bool allow_phone_number;				// The phone number is in allow_list
+	bool ignore_phone_number;				// The phone number is in ignore_list
 
-	bool process_incoming;	// false, true = ignore
+	bool ignored;							// The phone number has been ignored
+
+	bool process_incoming;					// false, true = ignore
 };
 
-struct CONTACT
+struct contact_info
 {
 	union
 	{
 		struct	// Keep these in alphabetical order.
 		{
-			char *cell_phone_number;	// Cell Phone Number
-			char *business_name;		// Company
-			char *department;			// Department
-			char *email_address;		// Email Address
-			char *fax_number;			// Fax Number
-			char *first_name;			// First Name
-			char *home_phone_number;	// Home Phone Number
-			char *designation;			// Job Title
-			char *last_name;			// Last Name
-			char *nickname;				// Nickname
-			char *office_phone_number;	// Office Phone Number
-			char *other_phone_number;	// Other Phone Number
-			char *category;				// Profession
-			char *title;				// Title
-			char *web_page;				// Web Page
-			char *work_phone_number;	// Work Phone Number
+			wchar_t *w_cell_phone_number;	// Cell Phone Number
+			wchar_t *w_business_name;		// Company
+			wchar_t *w_department;			// Department
+			wchar_t *w_email_address;		// Email Address
+			wchar_t *w_fax_number;			// Fax Number
+			wchar_t *w_first_name;			// First Name
+			wchar_t *w_home_phone_number;	// Home Phone Number
+			wchar_t *w_designation;			// Job Title
+			wchar_t *w_last_name;			// Last Name
+			wchar_t *w_nickname;			// Nickname
+			wchar_t *w_office_phone_number;	// Office Phone Number
+			wchar_t *w_other_phone_number;	// Other Phone Number
+			wchar_t *w_category;			// Profession
+			wchar_t *w_title;				// Title
+			wchar_t *w_web_page;			// Web Page
+			wchar_t *w_work_phone_number;	// Work Phone Number
 		};
 
-		char *contact_values[ 16 ];
+		wchar_t *w_contact_info_values[ 16 ];
 	};
-};
-
-struct contactinfo
-{
-	CONTACT contact;
 
 	union
 	{
 		struct	// Keep these in alphabetical order.
 		{
-			wchar_t *cell_phone_number;		// Cell Phone Number
-			wchar_t *business_name;			// Company
-			wchar_t *department;			// Department
-			wchar_t *email_address;			// Email Address
-			wchar_t *fax_number;			// Fax Number
-			wchar_t *first_name;			// First Name
-			wchar_t *home_phone_number;		// Home Phone Number
-			wchar_t *designation;			// Job Title
-			wchar_t *last_name;				// Last Name
-			wchar_t *nickname;				// Nickname
-			wchar_t *office_phone_number;	// Office Phone Number
-			wchar_t *other_phone_number;	// Other Phone Number
-			wchar_t *category;				// Profession
-			wchar_t *title;					// Title
-			wchar_t *web_page;				// Web Page
-			wchar_t *work_phone_number;		// Work Phone Number
+			// Unformatted numbers.
+			wchar_t *cell_phone_number;
+			wchar_t *fax_number;
+			wchar_t *home_phone_number;
+			wchar_t *office_phone_number;
+			wchar_t *other_phone_number;
+			wchar_t *work_phone_number;
 		};
 
-		wchar_t *contactinfo_values[ 16 ];
+		wchar_t *w_contact_info_phone_numbers[ 6 ];
 	};
 
-	wchar_t *picture_path;			// Local path to picture.
-	ringtoneinfo *ringtone_info;	// Local path and file name of the ringtone.
+	wchar_t *picture_path;		// Local path to picture.
+	ringtone_info *rti;			// Local path and file name of the ringtone.
 };
 
-struct contactupdateinfo
+struct contact_update_info
 {
-	contactinfo *old_ci;
-	contactinfo *new_ci;
+	contact_info *old_ci;
+	contact_info *new_ci;
 	unsigned char action;	// 0 Add, 1 Remove, 2 Add all from contact_list, 3 Update ci.
 	bool remove_picture;
 };
 
-struct ignoreinfo
+struct allow_ignore_info
 {
-	union
-	{
-		struct	// Keep these in alphabetical order.
-		{
-			char *c_phone_number;
-			char *c_total_calls;
-		};
+	ULARGE_INTEGER last_called;
 
-		char *c_ignoreinfo_values[ 2 ];
-	};
+	wchar_t *w_last_called;
+	wchar_t *w_phone_number;	// This number is formatted.
 
-	union
-	{
-		struct	// Keep these in alphabetical order.
-		{
-			wchar_t *phone_number;
-			wchar_t *total_calls;
-		};
+	wchar_t *phone_number;		// This number is unformatted and use for comparisons.
 
-		wchar_t *ignoreinfo_values[ 2 ];
-	};
-
-	unsigned int count;		// Number of times the call has been ignored.
-	unsigned char state;	// 0 = keep, 1 = remove.
+	unsigned int count;			// Number of times the call has been ignored.
+	unsigned char state;		// 0 = keep, 1 = remove.
 };
 
-struct ignorecidinfo
+struct allow_ignore_cid_info
 {
-	union
-	{
-		struct	// Keep these in alphabetical order.
-		{
-			char *c_caller_id;
-			char *c_match_case;
-			char *c_match_whole_word;
-			char *c_total_calls;
-		};
+	ULARGE_INTEGER last_called;
 
-		char *c_ignorecidinfo_values[ 4 ];
-	};
+	wchar_t *w_last_called;
 
-	union
-	{
-		struct	// Keep these in alphabetical order.
-		{
-			wchar_t *caller_id;
-			wchar_t *w_match_case;
-			wchar_t *w_match_whole_word;
-			wchar_t *total_calls;
-		};
-
-		wchar_t *ignorecidinfo_values[ 4 ];
-	};
+	wchar_t *caller_id;
 
 	unsigned int count;		// Number of times the call has been ignored.
 	unsigned char state;	// 0 = keep, 1 = remove.
 
-	bool match_case;
-	bool match_whole_word;
+	unsigned char match_flag;	// 0x00 None, 0x01 Match Whole Word, 0x02 Match Case, 0x04 Regular Expression.
 
 	bool active;			// A caller ID value has been matched.
 };
 
-struct ignoreupdateinfo
+struct allow_ignore_update_info
 {
+	ULARGE_INTEGER last_called;
 	HWND hWnd;
-	char *phone_number;		// Phone number to add.
-	ignoreinfo *ii;			// Ignore info to update.
-	unsigned char action;	// 0 Add, 1 Remove, 2 Add all from ignore_list, 3 Update ii.
+	wchar_t *phone_number;		// Phone number to add.
+	allow_ignore_info *aii;		// Allow/Ignore info to update.
+	unsigned char action;		// 0 Add, 1 Remove, 2 Add all from ignore_list, 3 Update aii, 4 Update call count and last called time.
+	unsigned char list_type;	// 0 Allow, 1 = Ignore.
 };
 
-struct ignorecidupdateinfo
+struct allow_ignore_cid_update_info
 {
+	ULARGE_INTEGER last_called;
 	HWND hWnd;
-	char *caller_id;		// Caller ID to add.
-	ignorecidinfo *icidi;	// Ignore info to update.
-	unsigned char action;	// 0 Add, 1 Remove, 2 Add all from ignore_cid_list, 3 Update icidi.
-	bool match_case;
-	bool match_whole_word;
+	wchar_t *caller_id;				// Caller ID to add.
+	allow_ignore_cid_info *aicidi;	// Allow/Ignore info to update.
+	unsigned char action;			// 0 Add, 1 Remove, 2 Add all from ignore_cid_list, 3 Update aicidi, 4 Update call count and last called time.
+	unsigned char match_flag;		// 0x00 None, 0x01 Match Whole Word, 0x02 Match Case, 0x04 Regular Expression.
+	unsigned char list_type;		// 0 Allow, 1 = Ignore.
 };
 
-struct sortinfo
+struct sort_info
 {
 	HWND hWnd;
 	int column;
 	unsigned char direction;
 };
 
+struct WINDOW_SETTINGS
+{
+	POINT window_position;
+	POINT drag_position;
+	bool is_dragging;
+};
+
+struct CONTACT_PICTURE_INFO
+{
+	wchar_t *picture_path;
+	HBITMAP picture;
+	unsigned int height;
+	unsigned int width;
+	bool free_picture_path;	// Used for previewing.
+};
+
+struct SHARED_SETTINGS	// These are settings that the popup window will need.
+{
+	CONTACT_PICTURE_INFO contact_picture_info;
+	COLORREF popup_background_color1;
+	COLORREF popup_background_color2;
+	ringtone_info *rti;
+	unsigned short popup_time;
+	unsigned char popup_gradient_direction;
+	bool popup_gradient;
+};
+
+struct POPUP_INFO
+{
+	wchar_t *font_face;
+	COLORREF font_color;
+	COLORREF font_shadow_color;
+	LONG font_height;
+	LONG font_weight;
+	BYTE font_italic;
+	BYTE font_underline;
+	BYTE font_strikeout;
+	unsigned char justify_line;
+	char line_order;
+	bool font_shadow;
+};
+
+struct POPUP_SETTINGS
+{
+	POPUP_INFO popup_info;
+	WINDOW_SETTINGS window_settings;
+	HFONT font;
+	SHARED_SETTINGS *shared_settings;
+	wchar_t *line_text;
+};
+
+struct SEARCH_INFO
+{
+	wchar_t *text;
+	unsigned char type;			// 0 = Caller ID Name, 1 = Phone Number
+	unsigned char search_flag;	// 0x00 = None, 0x01 = Match case, 0x02 = Match whole word, 0x04 = Regular expression.
+	bool search_all;
+};
 
 // These are all variables that are shared among the separate .cpp files.
 
@@ -325,7 +323,7 @@ extern SYSTEMTIME g_compile_time;
 // Object handles.
 extern HWND g_hWnd_main;				// Handle to our main window.
 extern HWND g_hWnd_options;				// Handle to our options window.
-extern HWND g_hWnd_columns;
+extern HWND g_hWnd_search;
 extern HWND g_hWnd_contact;
 extern HWND g_hWnd_ignore_phone_number;
 extern HWND g_hWnd_ignore_cid;
@@ -336,6 +334,9 @@ extern HWND g_hWnd_contact_list;
 extern HWND g_hWnd_ignore_tab;
 extern HWND g_hWnd_ignore_cid_list;
 extern HWND g_hWnd_ignore_list;
+extern HWND g_hWnd_allow_tab;
+extern HWND g_hWnd_allow_cid_list;
+extern HWND g_hWnd_allow_list;
 extern HWND g_hWnd_tab;
 extern HWND g_hWnd_active;				// Handle to the active window. Used to handle tab stops.
 
@@ -392,21 +393,25 @@ extern bool in_ml_update_thread;
 extern bool in_ml_worker_thread;
 extern bool in_ringtone_update_thread;
 
-extern bool skip_log_draw;				// Prevents WM_DRAWITEM from accessing listview items while we're removing them.
-extern bool skip_contact_draw;
-extern bool skip_ignore_draw;
-extern bool skip_ignore_cid_draw;
+extern bool skip_list_draw;					// Prevents WM_DRAWITEM from accessing listview items while we're removing them.
 
+extern RANGE *allow_range_list[ 16 ];
 extern RANGE *ignore_range_list[ 16 ];
 
 extern dllrbt_tree *modem_list;
-extern modeminfo *default_modem;
+extern modem_info *default_modem;
 
 extern dllrbt_tree *recording_list;
-extern ringtoneinfo *default_recording;
+extern ringtone_info *default_recording;
 
 extern dllrbt_tree *ringtone_list;
-extern ringtoneinfo *default_ringtone;
+extern ringtone_info *default_ringtone;
+
+extern dllrbt_tree *allow_list;
+extern bool allow_list_changed;
+
+extern dllrbt_tree *allow_cid_list;
+extern bool allow_cid_list_changed;
 
 extern dllrbt_tree *ignore_list;
 extern bool ignore_list_changed;
@@ -422,12 +427,14 @@ extern bool call_log_changed;
 
 extern unsigned char update_check_state;
 
-extern unsigned char total_tabs;
+extern unsigned char g_total_tabs;
 
-extern unsigned char total_columns1;
-extern unsigned char total_columns2;
-extern unsigned char total_columns3;
-extern unsigned char total_columns4;
+extern unsigned char g_total_columns1;
+extern unsigned char g_total_columns2;
+extern unsigned char g_total_columns3;
+extern unsigned char g_total_columns4;
+extern unsigned char g_total_columns5;
+extern unsigned char g_total_columns6;
 
 // Saved configuration variables
 extern int cfg_pos_x;
@@ -462,125 +469,130 @@ extern bool cfg_popup_gradient;
 extern unsigned char cfg_popup_gradient_direction;
 extern COLORREF cfg_popup_background_color1;
 extern COLORREF cfg_popup_background_color2;
-
-extern wchar_t *cfg_popup_font_face1;
-extern wchar_t *cfg_popup_font_face2;
-extern wchar_t *cfg_popup_font_face3;
-extern COLORREF cfg_popup_font_color1;
-extern COLORREF cfg_popup_font_color2;
-extern COLORREF cfg_popup_font_color3;
-extern LONG cfg_popup_font_height1;
-extern LONG cfg_popup_font_height2;
-extern LONG cfg_popup_font_height3;
-extern LONG cfg_popup_font_weight1;
-extern LONG cfg_popup_font_weight2;
-extern LONG cfg_popup_font_weight3;
-extern BYTE cfg_popup_font_italic1;
-extern BYTE cfg_popup_font_italic2;
-extern BYTE cfg_popup_font_italic3;
-extern BYTE cfg_popup_font_underline1;
-extern BYTE cfg_popup_font_underline2;
-extern BYTE cfg_popup_font_underline3;
-extern BYTE cfg_popup_font_strikeout1;
-extern BYTE cfg_popup_font_strikeout2;
-extern BYTE cfg_popup_font_strikeout3;
-extern bool cfg_popup_font_shadow1;
-extern bool cfg_popup_font_shadow2;
-extern bool cfg_popup_font_shadow3;
-extern COLORREF cfg_popup_font_shadow_color1;
-extern COLORREF cfg_popup_font_shadow_color2;
-extern COLORREF cfg_popup_font_shadow_color3;
-extern unsigned char cfg_popup_justify_line1;
-extern unsigned char cfg_popup_justify_line2;
-extern unsigned char cfg_popup_justify_line3;
-extern char cfg_popup_line_order1;
-extern char cfg_popup_line_order2;
-extern char cfg_popup_line_order3;
 extern unsigned char cfg_popup_time_format;
-
 extern bool cfg_popup_enable_ringtones;
 extern wchar_t *cfg_popup_ringtone;
+
+extern POPUP_INFO cfg_popup_info1;
+extern POPUP_INFO cfg_popup_info2;
+extern POPUP_INFO cfg_popup_info3;
 
 extern char cfg_tab_order1;
 extern char cfg_tab_order2;
 extern char cfg_tab_order3;
+extern char cfg_tab_order4;
 
-extern int cfg_column_width1;
-extern int cfg_column_width2;
-extern int cfg_column_width3;
-extern int cfg_column_width4;
-extern int cfg_column_width5;
-extern int cfg_column_width6;
+// Allow
+extern int cfg_column_al_width1;
+extern int cfg_column_al_width2;
+extern int cfg_column_al_width3;
+extern int cfg_column_al_width4;
 
-extern char cfg_column_order1;
-extern char cfg_column_order2;
-extern char cfg_column_order3;
-extern char cfg_column_order4;
-extern char cfg_column_order5;
-extern char cfg_column_order6;
+extern char cfg_column_al_order1;
+extern char cfg_column_al_order2;
+extern char cfg_column_al_order3;
+extern char cfg_column_al_order4;
 
-extern int cfg_column2_width1;
-extern int cfg_column2_width2;
-extern int cfg_column2_width3;
-extern int cfg_column2_width4;
-extern int cfg_column2_width5;
-extern int cfg_column2_width6;
-extern int cfg_column2_width7;
-extern int cfg_column2_width8;
-extern int cfg_column2_width9;
-extern int cfg_column2_width10;
-extern int cfg_column2_width11;
-extern int cfg_column2_width12;
-extern int cfg_column2_width13;
-extern int cfg_column2_width14;
-extern int cfg_column2_width15;
-extern int cfg_column2_width16;
-extern int cfg_column2_width17;
+// Allow CID
+extern int cfg_column_acidl_width1;
+extern int cfg_column_acidl_width2;
+extern int cfg_column_acidl_width3;
+extern int cfg_column_acidl_width4;
+extern int cfg_column_acidl_width5;
+extern int cfg_column_acidl_width6;
+extern int cfg_column_acidl_width7;
 
-extern char cfg_column2_order1;
-extern char cfg_column2_order2;
-extern char cfg_column2_order3;
-extern char cfg_column2_order4;
-extern char cfg_column2_order5;
-extern char cfg_column2_order6;
-extern char cfg_column2_order7;
-extern char cfg_column2_order8;
-extern char cfg_column2_order9;
-extern char cfg_column2_order10;
-extern char cfg_column2_order11;
-extern char cfg_column2_order12;
-extern char cfg_column2_order13;
-extern char cfg_column2_order14;
-extern char cfg_column2_order15;
-extern char cfg_column2_order16;
-extern char cfg_column2_order17;
+extern char cfg_column_acidl_order1;
+extern char cfg_column_acidl_order2;
+extern char cfg_column_acidl_order3;
+extern char cfg_column_acidl_order4;
+extern char cfg_column_acidl_order5;
+extern char cfg_column_acidl_order6;
+extern char cfg_column_acidl_order7;
 
-extern int cfg_column3_width1;
-extern int cfg_column3_width2;
-extern int cfg_column3_width3;
+// Call Log
+extern int cfg_column_cll_width1;
+extern int cfg_column_cll_width2;
+extern int cfg_column_cll_width3;
+extern int cfg_column_cll_width4;
+extern int cfg_column_cll_width5;
+extern int cfg_column_cll_width6;
+extern int cfg_column_cll_width7;
+extern int cfg_column_cll_width8;
 
-extern char cfg_column3_order1;
-extern char cfg_column3_order2;
-extern char cfg_column3_order3;
+extern char cfg_column_cll_order1;
+extern char cfg_column_cll_order2;
+extern char cfg_column_cll_order3;
+extern char cfg_column_cll_order4;
+extern char cfg_column_cll_order5;
+extern char cfg_column_cll_order6;
+extern char cfg_column_cll_order7;
+extern char cfg_column_cll_order8;
 
-extern int cfg_column4_width1;
-extern int cfg_column4_width2;
-extern int cfg_column4_width3;
-extern int cfg_column4_width4;
-extern int cfg_column4_width5;
+// Contact
+extern int cfg_column_cl_width1;
+extern int cfg_column_cl_width2;
+extern int cfg_column_cl_width3;
+extern int cfg_column_cl_width4;
+extern int cfg_column_cl_width5;
+extern int cfg_column_cl_width6;
+extern int cfg_column_cl_width7;
+extern int cfg_column_cl_width8;
+extern int cfg_column_cl_width9;
+extern int cfg_column_cl_width10;
+extern int cfg_column_cl_width11;
+extern int cfg_column_cl_width12;
+extern int cfg_column_cl_width13;
+extern int cfg_column_cl_width14;
+extern int cfg_column_cl_width15;
+extern int cfg_column_cl_width16;
+extern int cfg_column_cl_width17;
 
-extern char cfg_column4_order1;
-extern char cfg_column4_order2;
-extern char cfg_column4_order3;
-extern char cfg_column4_order4;
-extern char cfg_column4_order5;
+extern char cfg_column_cl_order1;
+extern char cfg_column_cl_order2;
+extern char cfg_column_cl_order3;
+extern char cfg_column_cl_order4;
+extern char cfg_column_cl_order5;
+extern char cfg_column_cl_order6;
+extern char cfg_column_cl_order7;
+extern char cfg_column_cl_order8;
+extern char cfg_column_cl_order9;
+extern char cfg_column_cl_order10;
+extern char cfg_column_cl_order11;
+extern char cfg_column_cl_order12;
+extern char cfg_column_cl_order13;
+extern char cfg_column_cl_order14;
+extern char cfg_column_cl_order15;
+extern char cfg_column_cl_order16;
+extern char cfg_column_cl_order17;
 
-extern bool cfg_connection_auto_login;
-extern bool cfg_connection_reconnect;
-extern unsigned char cfg_connection_retries;
+// Ignore
+extern int cfg_column_il_width1;
+extern int cfg_column_il_width2;
+extern int cfg_column_il_width3;
+extern int cfg_column_il_width4;
 
-extern unsigned short cfg_connection_timeout;
-extern unsigned char cfg_connection_ssl_version;
+extern char cfg_column_il_order1;
+extern char cfg_column_il_order2;
+extern char cfg_column_il_order3;
+extern char cfg_column_il_order4;
+
+// Ignore CID
+extern int cfg_column_icidl_width1;
+extern int cfg_column_icidl_width2;
+extern int cfg_column_icidl_width3;
+extern int cfg_column_icidl_width4;
+extern int cfg_column_icidl_width5;
+extern int cfg_column_icidl_width6;
+extern int cfg_column_icidl_width7;
+
+extern char cfg_column_icidl_order1;
+extern char cfg_column_icidl_order2;
+extern char cfg_column_icidl_order3;
+extern char cfg_column_icidl_order4;
+extern char cfg_column_icidl_order5;
+extern char cfg_column_icidl_order6;
+extern char cfg_column_icidl_order7;
 
 extern bool cfg_popup_enable_recording;
 extern wchar_t *cfg_recording;
@@ -591,69 +603,24 @@ extern unsigned char cfg_drop_call_wait;
 extern GUID cfg_modem_guid;
 
 extern bool g_voice_playback_supported;
+extern bool g_use_regular_expressions;
 
-extern char *tab_order[ NUM_TABS ];
+extern POPUP_INFO *g_popup_info[];
 
-extern char *call_log_columns[ NUM_COLUMNS1 ];
-extern char *contact_list_columns[ NUM_COLUMNS2 ];
-extern char *ignore_list_columns[ NUM_COLUMNS3 ];
-extern char *ignore_cid_list_columns[ NUM_COLUMNS4 ];
+extern char *tab_order[];
 
-extern int *call_log_columns_width[ NUM_COLUMNS1 ];
-extern int *contact_list_columns_width[ NUM_COLUMNS2 ];
-extern int *ignore_list_columns_width[ NUM_COLUMNS3 ];
-extern int *ignore_cid_list_columns_width[ NUM_COLUMNS4 ];
+extern char *call_log_columns[];
+extern char *contact_list_columns[];
+extern char *ignore_list_columns[];
+extern char *ignore_cid_list_columns[];
+extern char *allow_list_columns[];
+extern char *allow_cid_list_columns[];
 
-struct WINDOW_SETTINGS
-{
-	POINT window_position;
-	POINT drag_position;
-	bool is_dragging;
-};
-
-struct CONTACT_PICTURE_INFO
-{
-	wchar_t *picture_path;
-	HBITMAP picture;
-	unsigned int height;
-	unsigned int width;
-	bool free_picture_path;	// Used for previewing.
-};
-
-struct SHARED_SETTINGS	// These are settings that the popup window will need.
-{
-	CONTACT_PICTURE_INFO contact_picture_info;
-	COLORREF popup_background_color1;
-	COLORREF popup_background_color2;
-	ringtoneinfo *ringtone_info;
-	unsigned short popup_time;
-	unsigned char popup_gradient_direction;
-	bool popup_gradient;
-};
-
-struct POPUP_SETTINGS
-{
-	WINDOW_SETTINGS window_settings;
-	HFONT font;
-	COLORREF font_color;
-	COLORREF font_shadow_color;
-	LONG font_height;
-	LONG font_weight;
-	wchar_t *font_face;
-	wchar_t *line_text;
-	SHARED_SETTINGS *shared_settings;
-	unsigned char popup_justify;
-	char popup_line_order;
-	BYTE font_italic;
-	BYTE font_underline;
-	BYTE font_strikeout;
-	bool font_shadow;
-};
-
-struct LOGIN_SETTINGS
-{
-	char *username;
-	char *password;
-};
+extern int *call_log_columns_width[];
+extern int *contact_list_columns_width[];
+extern int *ignore_list_columns_width[];
+extern int *ignore_cid_list_columns_width[];
+extern int *allow_list_columns_width[];
+extern int *allow_cid_list_columns_width[];
 
 #endif

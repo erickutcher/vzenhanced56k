@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -40,10 +40,113 @@ HMENU g_hMenuSub_message_log = NULL;
 bool skip_message_log_draw = false;
 bool add_to_ml_top = true;
 
+WNDPROC MSGLogListProc = NULL;
+
+LRESULT CALLBACK MSGLogListSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
+{
+	switch ( msg )
+	{
+		case WM_NOTIFY:
+		{
+			// Get our listview codes.
+			switch ( ( ( LPNMHDR )lParam )->code )
+			{
+				case HDN_DIVIDERDBLCLICK:
+				{
+					NMHEADER *nmh = ( NMHEADER * )lParam;
+
+					int largest_width;
+
+					if ( GetKeyState( VK_CONTROL ) & 0x8000 )
+					{
+						largest_width = LVSCW_AUTOSIZE_USEHEADER;
+					}
+					else
+					{
+						largest_width = 26;	// 5 + 16 + 5.
+
+						wchar_t tbuf[ 11 ];
+						wchar_t *buf = NULL;
+
+						LVITEM lvi;
+						_memzero( &lvi, sizeof( LVITEM ) );
+
+						int index = ( int )_SendMessageW( hWnd, LVM_GETTOPINDEX, 0, 0 );
+						int index_end = ( int )_SendMessageW( hWnd, LVM_GETCOUNTPERPAGE, 0, 0 ) + index;
+
+						RECT rc;
+						HDC hDC = _GetDC( hWnd );
+						HFONT ohf = ( HFONT )_SelectObject( hDC, hFont );
+						_DeleteObject( ohf );
+
+						for ( ; index <= index_end; ++index )
+						{
+							lvi.iItem = index;
+							lvi.mask = LVIF_PARAM;
+							if ( _SendMessageW( hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi ) == TRUE )
+							{
+								MESSAGE_LOG_INFO *mli = ( MESSAGE_LOG_INFO * )lvi.lParam;
+								if ( mli != NULL )
+								{
+									// Save the appropriate text in our buffer for the current column.
+									switch ( nmh->iItem )
+									{
+										case 0:
+										{
+											buf = tbuf;	// Reset the buffer pointer.
+
+											__snwprintf( buf, 11, L"%lu", index + 1 );
+										}
+										break;
+
+										case 1: { buf = mli->w_date_and_time; } break;
+										case 2: { buf = mli->w_level; } break;
+										case 3: { buf = mli->message; } break;
+									}
+
+									if ( buf == NULL )
+									{
+										tbuf[ 0 ] = L'\0';
+										buf = tbuf;
+									}
+
+									rc.bottom = rc.left = rc.right = rc.top = 0;
+
+									_DrawTextW( hDC, buf, -1, &rc, DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT );
+
+									int width = ( rc.right - rc.left ) + 10;	// 5 + 5 padding.
+									if ( width > largest_width )
+									{
+										largest_width = width;
+									}
+								}
+							}
+							else
+							{
+								break;
+							}
+						}
+
+						_ReleaseDC( hWnd, hDC );
+					}
+
+					_SendMessageW( hWnd, LVM_SETCOLUMNWIDTH, nmh->iItem, largest_width );
+
+					return TRUE;
+				}
+				break;
+			}
+		}
+		break;
+	}
+
+	return _CallWindowProcW( MSGLogListProc, hWnd, msg, wParam, lParam );
+}
+
 // Sort function for columns.
 int CALLBACK MLCompareFunc( LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort )
 {
-	sortinfo *si = ( sortinfo * )lParamSort;
+	sort_info *si = ( sort_info * )lParamSort;
 
 	if ( si->hWnd == g_hWnd_message_log_list )
 	{
@@ -80,9 +183,9 @@ LRESULT CALLBACK MessageLogWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 			g_hWnd_message_log_list = _CreateWindowExW( WS_EX_CLIENTEDGE, WC_LISTVIEW, NULL, LVS_REPORT | LVS_OWNERDRAWFIXED | WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, hWnd, NULL, NULL, NULL );
 			_SendMessageW( g_hWnd_message_log_list, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_DOUBLEBUFFER | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES );
 
-			g_hWnd_save_log = _CreateWindowW( WC_BUTTON, ST_Save_Message_Log___,  WS_CHILD | WS_DISABLED | WS_TABSTOP | WS_VISIBLE, 0, 0, 0, 0, hWnd, ( HMENU )BTN_SAVE_LOG, NULL, NULL );
-			g_hWnd_clear_log = _CreateWindowW( WC_BUTTON, ST_Clear_Message_Log,  WS_CHILD | WS_DISABLED | WS_TABSTOP | WS_VISIBLE, 0, 0, 0, 0, hWnd, ( HMENU )BTN_CLEAR_LOG, NULL, NULL );
-			g_hWnd_close_log_wnd = _CreateWindowW( WC_BUTTON, ST_Close,  BS_DEFPUSHBUTTON | WS_CHILD | WS_TABSTOP | WS_VISIBLE, 0, 0, 0, 0, hWnd, ( HMENU )BTN_CLOSE_LOG_WND, NULL, NULL );
+			g_hWnd_save_log = _CreateWindowW( WC_BUTTON, ST_Save_Message_Log___, WS_CHILD | WS_DISABLED | WS_TABSTOP | WS_VISIBLE, 0, 0, 0, 0, hWnd, ( HMENU )BTN_SAVE_LOG, NULL, NULL );
+			g_hWnd_clear_log = _CreateWindowW( WC_BUTTON, ST_Clear_Message_Log, WS_CHILD | WS_DISABLED | WS_TABSTOP | WS_VISIBLE, 0, 0, 0, 0, hWnd, ( HMENU )BTN_CLEAR_LOG, NULL, NULL );
+			g_hWnd_close_log_wnd = _CreateWindowW( WC_BUTTON, ST_Close, BS_DEFPUSHBUTTON | WS_CHILD | WS_TABSTOP | WS_VISIBLE, 0, 0, 0, 0, hWnd, ( HMENU )BTN_CLOSE_LOG_WND, NULL, NULL );
 
 			LVCOLUMN lvc;
 			_memzero( &lvc, sizeof( LVCOLUMN ) );
@@ -130,13 +233,16 @@ LRESULT CALLBACK MessageLogWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 			_SendMessageW( g_hWnd_save_log, WM_SETFONT, ( WPARAM )hFont, 0 );
 			_SendMessageW( g_hWnd_close_log_wnd, WM_SETFONT, ( WPARAM )hFont, 0 );
 
+			MSGLogListProc = ( WNDPROC )_GetWindowLongPtrW( g_hWnd_message_log_list, GWLP_WNDPROC );
+			_SetWindowLongPtrW( g_hWnd_message_log_list, GWLP_WNDPROC, ( LONG_PTR )MSGLogListSubProc );
+
 			return 0;
 		}
 		break;
 
 		case WM_COMMAND:
 		{
-			switch( LOWORD( wParam ) )
+			switch ( LOWORD( wParam ) )
 			{
 				case IDOK:
 				case BTN_CLOSE_LOG_WND:
@@ -223,7 +329,7 @@ LRESULT CALLBACK MessageLogWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 					lvc.mask = LVCF_FMT | LVCF_ORDER;
 					_SendMessageW( nmlv->hdr.hwndFrom, LVM_GETCOLUMN, nmlv->iSubItem, ( LPARAM )&lvc );
 
-					sortinfo si;
+					sort_info si;
 					si.column = lvc.iOrder;
 					si.hWnd = nmlv->hdr.hwndFrom;
 
@@ -234,8 +340,6 @@ LRESULT CALLBACK MessageLogWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 						// Sort down
 						lvc.fmt = lvc.fmt & ( ~HDF_SORTUP ) | HDF_SORTDOWN;
 						_SendMessageW( nmlv->hdr.hwndFrom, LVM_SETCOLUMN, ( WPARAM )nmlv->iSubItem, ( LPARAM )&lvc );
-
-						_SendMessageW( nmlv->hdr.hwndFrom, LVM_SORTITEMS, ( WPARAM )&si, ( LPARAM )( PFNLVCOMPARE )MLCompareFunc );
 					}
 					else if ( HDF_SORTDOWN & lvc.fmt )	// Column is sorted downward.
 					{
@@ -244,8 +348,6 @@ LRESULT CALLBACK MessageLogWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 						// Sort up
 						lvc.fmt = lvc.fmt & ( ~HDF_SORTDOWN ) | HDF_SORTUP;
 						_SendMessageW( nmlv->hdr.hwndFrom, LVM_SETCOLUMN, nmlv->iSubItem, ( LPARAM )&lvc );
-
-						_SendMessageW( nmlv->hdr.hwndFrom, LVM_SORTITEMS, ( WPARAM )&si, ( LPARAM )( PFNLVCOMPARE )MLCompareFunc );
 					}
 					else	// Column has no sorting set.
 					{
@@ -267,9 +369,9 @@ LRESULT CALLBACK MessageLogWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 						// Sort down to start.
 						lvc.fmt = lvc.fmt | HDF_SORTDOWN;
 						_SendMessageW( nmlv->hdr.hwndFrom, LVM_SETCOLUMN, nmlv->iSubItem, ( LPARAM )&lvc );
-
-						_SendMessageW( nmlv->hdr.hwndFrom, LVM_SORTITEMS, ( WPARAM )&si, ( LPARAM )( PFNLVCOMPARE )MLCompareFunc );
 					}
+
+					_SendMessageW( nmlv->hdr.hwndFrom, LVM_SORTITEMS, ( WPARAM )&si, ( LPARAM )( PFNLVCOMPARE )MLCompareFunc );
 
 					// Add items to the top of the list, or the bottom.
 					if ( si.column == 1 )
@@ -288,13 +390,13 @@ LRESULT CALLBACK MessageLogWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 						POINT p;
 						_GetCursorPos( &p );
 
-						int item_count = _SendMessageW( nmitem->hdr.hwndFrom, LVM_GETITEMCOUNT, 0, 0 );
-						int sel_count = _SendMessageW( nmitem->hdr.hwndFrom, LVM_GETSELECTEDCOUNT, 0, 0 );
+						int item_count = ( int )_SendMessageW( nmitem->hdr.hwndFrom, LVM_GETITEMCOUNT, 0, 0 );
+						int sel_count = ( int )_SendMessageW( nmitem->hdr.hwndFrom, LVM_GETSELECTEDCOUNT, 0, 0 );
 						
 						_EnableMenuItem( g_hMenuSub_message_log, MENU_ML_COPY_SEL, ( sel_count > 0 ? MF_ENABLED : MF_DISABLED ) );
 						_EnableMenuItem( g_hMenuSub_message_log, MENU_ML_SELECT_ALL, ( sel_count == item_count ? MF_DISABLED : MF_ENABLED ) );
 
-						_TrackPopupMenu( g_hMenuSub_message_log, 0, p.x, p.y, 0, g_hWnd_message_log, NULL );
+						_TrackPopupMenu( g_hMenuSub_message_log, 0, p.x, p.y, 0, hWnd, NULL );
 					}
 				}
 				break;
@@ -357,7 +459,7 @@ LRESULT CALLBACK MessageLogWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 				}
 
 				// Alternate item color's background.
-				if ( dis->itemID % 2 )	// Even rows will have a light grey background.
+				if ( dis->itemID & 1 )	// Even rows will have a light grey background.
 				{
 					HBRUSH color = _CreateSolidBrush( ( COLORREF )RGB( 0xF7, 0xF7, 0xF7 ) );
 					_FillRect( dis->hDC, &dis->rcItem, color );
@@ -401,23 +503,9 @@ LRESULT CALLBACK MessageLogWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 						}
 						break;
 
-						case 1:
-						{
-							buf = mli->w_date_and_time;
-						}
-						break;
-
-						case 2:
-						{
-							buf = mli->w_level;
-						}
-						break;
-
-						case 3:
-						{
-							buf = mli->message;
-						}
-						break;
+						case 1: { buf = mli->w_date_and_time; } break;
+						case 2: { buf = mli->w_level; } break;
+						case 3: { buf = mli->message; } break;
 					}
 
 					if ( buf == NULL )
@@ -475,7 +563,7 @@ LRESULT CALLBACK MessageLogWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 						_DeleteObject( color );
 
 						// White text.
-						_SetTextColor( hdcMem, RGB( 0xFF, 0xFF, 0xFF ) );
+						_SetTextColor( hdcMem, _GetSysColor( COLOR_WINDOW ) );
 						_DrawTextW( hdcMem, buf, -1, &rc, DT_NOPREFIX | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS );
 						_BitBlt( dis->hDC, dis->rcItem.left + last_rc.left, last_rc.top, width, height, hdcMem, 0, 0, SRCCOPY );
 					}
@@ -489,12 +577,12 @@ LRESULT CALLBACK MessageLogWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 						// Set the level to either red, orange, or blue.
 						if ( i == 2 )
 						{
-							_SetTextColor( hdcMem, ( mli->level == 0 ? RGB( 0xFF, 0x00, 0x00 ) : ( mli->level == 1 ? RGB( 0xFF, 0x80, 0x00 ) : ( mli->level == 2 ? RGB( 0x80, 0x80, 0xFF ) : RGB( 0x00, 0x00, 0x00 ) ) ) ) );
+							_SetTextColor( hdcMem, ( mli->level == 0 ? RGB( 0xFF, 0x00, 0x00 ) : ( mli->level == 1 ? RGB( 0xFF, 0x80, 0x00 ) : ( mli->level == 2 ? RGB( 0x80, 0x80, 0xFF ) : _GetSysColor( COLOR_WINDOWTEXT ) ) ) ) );
 						}
 						else
 						{
 							// Black text.
-							_SetTextColor( hdcMem, RGB( 0x00, 0x00, 0x00 ) );
+							_SetTextColor( hdcMem, _GetSysColor( COLOR_WINDOWTEXT ) );
 						}
 						_DrawTextW( hdcMem, buf, -1, &rc, DT_NOPREFIX | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS );
 						_BitBlt( dis->hDC, dis->rcItem.left + last_rc.left, last_rc.top, width, height, hdcMem, 0, 0, SRCAND );
@@ -526,8 +614,8 @@ LRESULT CALLBACK MessageLogWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 			// Allow our listview to resize in proportion to the main window.
 			HDWP hdwp = _BeginDeferWindowPos( 4 );
 			_DeferWindowPos( hdwp, g_hWnd_message_log_list, HWND_TOP, 10, 10, rc.right - 20, rc.bottom - 52, SWP_NOZORDER );
-			_DeferWindowPos( hdwp, g_hWnd_save_log, HWND_TOP, 10, rc.bottom - 32, 130, 23, SWP_NOZORDER );
-			_DeferWindowPos( hdwp, g_hWnd_clear_log, HWND_TOP, 150, rc.bottom - 32, 130, 23, SWP_NOZORDER );
+			_DeferWindowPos( hdwp, g_hWnd_save_log, HWND_TOP, 10, rc.bottom - 32, 140, 23, SWP_NOZORDER );
+			_DeferWindowPos( hdwp, g_hWnd_clear_log, HWND_TOP, 160, rc.bottom - 32, 140, 23, SWP_NOZORDER );
 			_DeferWindowPos( hdwp, g_hWnd_close_log_wnd, HWND_TOP, rc.right - 90, rc.bottom - 32, 80, 23, SWP_NOZORDER );
 			_EndDeferWindowPos( hdwp );
 

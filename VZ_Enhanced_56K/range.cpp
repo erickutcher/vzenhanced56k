@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -22,11 +22,11 @@
 
 #include "range.h"
 
-bool RangeCompare( const char *range, const char *value )
+bool RangeCompare( const wchar_t *range, const wchar_t *value )
 {
-	for ( ; *range == '*' || *range == *value; range++, value++ )
+	for ( ; *range == L'*' || *range == *value; range++, value++ )
 	{
-		if ( *range == '\0' )
+		if ( *range == L'\0' )
 		{
 			return true;
 		}
@@ -35,7 +35,7 @@ bool RangeCompare( const char *range, const char *value )
 	return false;
 }
 
-RANGE *RangeCreateNode( char value )
+RANGE *RangeCreateNode( wchar_t value )
 {
 	RANGE *range = ( RANGE * )GlobalAlloc( GPTR, sizeof( RANGE ) );
 	if ( range != NULL )
@@ -49,7 +49,7 @@ RANGE *RangeCreateNode( char value )
 }
 
 
-void RangeAdd( RANGE **root, const char *value, int length )
+void RangeAdd( RANGE **root, const wchar_t *value, int length )
 {
 	RANGE *head = NULL;
 	RANGE *tmp = NULL;
@@ -84,7 +84,7 @@ void RangeAdd( RANGE **root, const char *value, int length )
 
 			if ( i == 0 )
 			{
-				if ( head->value == '*' )
+				if ( head->value == L'*' )
 				{
 					tmp->next = head->next;
 					head->next = tmp;
@@ -99,7 +99,7 @@ void RangeAdd( RANGE **root, const char *value, int length )
 			}
 			else
 			{
-				if ( head->child != NULL && head->child->value == '*' )
+				if ( head->child != NULL && head->child->value == L'*' )
 				{
 					tmp->next = head->child->next;
 					head->child->next = tmp;
@@ -117,7 +117,7 @@ void RangeAdd( RANGE **root, const char *value, int length )
 	}
 }
 
-bool RangeSearch( RANGE **head, const char *value, char found_value[ 32 ] )
+bool RangeSearch( RANGE **head, const wchar_t *value, wchar_t found_value[ 32 ] )
 {
 	if ( *head == NULL )
 	{
@@ -131,11 +131,11 @@ bool RangeSearch( RANGE **head, const char *value, char found_value[ 32 ] )
 	// Start searching for wildcard numbers.
 	while ( tmp != NULL )
 	{
-		if ( tmp->value == '*' )
+		if ( tmp->value == L'*' )
 		{
 			found = true;
 
-			*found_value = '*';
+			*found_value = L'*';
 
 			if ( tmp->child != NULL )
 			{
@@ -207,7 +207,7 @@ void RangeDelete( RANGE **head )
 	RangeDelete( &tmp );
 }
 
-bool RangeRemove( RANGE **head, const char *value, RANGE *parent )
+bool RangeRemove( RANGE **head, const wchar_t *value, RANGE *parent )
 {
 	if ( *head == NULL )
 	{

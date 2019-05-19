@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -19,25 +19,13 @@
 #ifndef _UTILITIES_H
 #define _UTILITIES_H
 
-struct copyinfo
-{
-	unsigned short column;
-	HWND hWnd;
-};
-
-struct removeinfo
-{
-	bool disable_critical_section;
-	HWND hWnd;
-};
-
 char *GlobalStrDupA( const char *_Str );
 wchar_t *GlobalStrDupW( const wchar_t *_Str );
 
 void encode_cipher( char *buffer, int buffer_length );
 void decode_cipher( char *buffer, int buffer_length );
 
-void CreatePopup( displayinfo *fi );
+void CreatePopup( display_info *di );
 
 void Processing_Window( HWND hWnd, bool enable );
 
@@ -50,31 +38,29 @@ void OffsetVirtualIndices( int *arr, char *column_arr[], unsigned char num_colum
 int GetColumnIndexFromVirtualIndex( int virtual_index, char *column_arr[], unsigned char num_columns );
 int GetVirtualIndexFromColumnIndex( int column_index, char *column_arr[], unsigned char num_columns );
 
-void free_displayinfo( displayinfo **di );
-void free_contactinfo( contactinfo **ci );
-void free_ignoreinfo( ignoreinfo **ii );
-void free_ignorecidinfo( ignorecidinfo **icidi );
+void free_displayinfo( display_info **di );
+void free_contactinfo( contact_info **ci );
+void free_allowignoreinfo( allow_ignore_info **aii );
+void free_allowignorecidinfo( allow_ignore_cid_info **aicidi );
 
-wchar_t *FormatPhoneNumber( char *phone_number );
-void FormatDisplayInfo( displayinfo *di );
+wchar_t *FormatPhoneNumberW( wchar_t *phone_number );
 
-ignorecidinfo *find_ignore_caller_id_name_match( displayinfo *di );
+allow_ignore_cid_info *find_caller_id_name_match( display_info *di, dllrbt_tree *list, unsigned char list_type );
 
-void add_custom_caller_id( contactinfo *ci );
-void remove_custom_caller_id( contactinfo *ci );
-char *get_custom_caller_id( char *phone_number, contactinfo **ci );
+void add_custom_caller_id_w( contact_info *ci );
+void remove_custom_caller_id_w( contact_info *ci );
+wchar_t *get_custom_caller_id_w( wchar_t *phone_number, contact_info **ci );
 void cleanup_custom_caller_id();
 
 wchar_t *GetMonth( unsigned short month );
 wchar_t *GetDay( unsigned short day );
 void UnixTimeToSystemTime( DWORD t, SYSTEMTIME *st );
 void GetCurrentCounterTime( ULARGE_INTEGER *li );
+wchar_t *FormatTimestamp( ULARGE_INTEGER timestamp );
 DWORD GetRemainingDropCallWaitTime( ULARGE_INTEGER start, ULARGE_INTEGER stop );
-char *url_encode( char *str, unsigned int str_len, unsigned int *enc_len = 0 );
-char is_num( const char *str );
+char is_num_w( const wchar_t *str );
 
 int dllrbt_compare_ptr( void *a, void *b );
-int dllrbt_compare_a( void *a, void *b );
 int dllrbt_compare_w( void *a, void *b );
 int dllrbt_compare_guid( void *a, void *b );
 int dllrbt_icid_compare( void *a, void *b );
@@ -83,16 +69,11 @@ void kill_worker_thread();
 void kill_telephony_thread();
 void kill_update_check_thread();
 
-char *GetFileExtension( char *path );
-char *GetFileNameA( char *path );
 wchar_t *GetFileNameW( wchar_t *path );
-char *GetMIMEByFileName( char *filename );
 
 HWND GetCurrentListView();
-char *GetSelectedColumnPhoneNumber( unsigned int column_id );
+wchar_t *GetSelectedColumnPhoneNumber( HWND hWnd, unsigned int column_id );
 
 char *escape_csv( const char *string );
-
-//extern unsigned short bad_area_codes[];
 
 #endif

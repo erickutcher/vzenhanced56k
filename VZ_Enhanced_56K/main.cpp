@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -33,6 +33,7 @@
 #include "lite_gdi32.h"
 #include "lite_comctl32.h"
 #include "lite_ole32.h"
+#include "lite_pcre2.h"
 
 #include "telephony.h"
 #include "waveout.h"
@@ -63,6 +64,8 @@ unsigned int base_directory_length = 0;
 wchar_t *app_directory = NULL;
 unsigned int app_directory_length = 0;
 
+bool g_use_regular_expressions = false;
+
 #ifndef NTDLL_USE_STATIC_LIB
 int APIENTRY _WinMain()
 #else
@@ -91,6 +94,16 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 	#ifndef SHELL32_USE_STATIC_LIB
 		if ( !InitializeShell32() ){ goto UNLOAD_DLLS; }
 	#endif
+	#ifndef PCRE2_USE_STATIC_LIB
+		if ( !InitializePCRE2() )
+		{
+			UnInitializePCRE2();
+		}
+		else
+		{
+			g_use_regular_expressions = true;
+		}
+	#endif
 
 	_memzero( &g_compile_time, sizeof( SYSTEMTIME ) );
 	if ( hInstance != NULL )
@@ -117,51 +130,73 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 	bool default_directory = true;
 	int argCount = 0;
 	LPWSTR *szArgList = _CommandLineToArgvW( GetCommandLineW(), &argCount );
-	if ( szArgList != NULL )
+	if ( szArgList != NULL && argCount > 1 )
 	{
-		// The first parameter is the path to the executable, second is our switch "-d", and third is the new base directory path.
-		if ( argCount == 3 &&
-			 szArgList[ 1 ][ 0 ] == L'-' && szArgList[ 1 ][ 1 ] == L'd' && szArgList[ 1 ][ 2 ] == 0 &&
-			 GetFileAttributesW( szArgList[ 2 ] ) == FILE_ATTRIBUTE_DIRECTORY )
+		if ( szArgList[ 1 ][ 0 ] == L'-' && szArgList[ 1 ][ 1 ] == L'-' )
 		{
-			base_directory_length = lstrlenW( szArgList[ 2 ] );
-			if ( base_directory_length >= MAX_PATH )
+			wchar_t *arg_name = szArgList[ 1 ] + 2;
+			int arg_name_length = lstrlenW( arg_name );
+
+			if ( argCount > 2 &&
+				 arg_name_length == 14 && _StrCmpNIW( arg_name, L"base-directory", 14 ) == 0 )	// Set the base directory.
 			{
-				base_directory_length = MAX_PATH - 1;
+				if ( GetFileAttributesW( szArgList[ 2 ] ) & FILE_ATTRIBUTE_DIRECTORY )
+				{
+					base_directory_length = lstrlenW( szArgList[ 2 ] );
+					if ( base_directory_length >= MAX_PATH )
+					{
+						base_directory_length = MAX_PATH - 1;
+					}
+					_wmemcpy_s( base_directory, MAX_PATH, szArgList[ 2 ], base_directory_length );
+					base_directory[ base_directory_length ] = 0;	// Sanity.
+
+					default_directory = false;
+				}
 			}
-			_wmemcpy_s( base_directory, MAX_PATH, szArgList[ 2 ], base_directory_length );
-			base_directory[ base_directory_length ] = 0;	// Sanity.
+			else if ( arg_name_length == 8 && _StrCmpNIW( arg_name, L"portable", 8 ) == 0 )	// Portable mode (use the application's current directory for our base directory).
+			{
+				base_directory_length = lstrlenW( szArgList[ 0 ] );
+				while ( base_directory_length != 0 && szArgList[ 0 ][ --base_directory_length ] != L'\\' );
 
-			default_directory = false;
-		}
-		else if ( argCount == 2 &&
-				  szArgList[ 1 ][ 0 ] == L'-' && szArgList[ 1 ][ 1 ] == L'p' )	// Portable mode (use the application's current directory for our base directory).
-		{
-			base_directory_length = app_directory_length;
-			_wmemcpy_s( base_directory, MAX_PATH, app_directory, base_directory_length );
-			base_directory[ base_directory_length ] = 0;	// Sanity.
+				_wmemcpy_s( base_directory, MAX_PATH, szArgList[ 0 ], base_directory_length );
+				base_directory[ base_directory_length ] = 0;	// Sanity.
 
-			default_directory = false;
+				default_directory = false;
+			}
 		}
 
 		// Free the parameter list.
 		LocalFree( szArgList );
 	}
 
-	// Use our default directory if none was supplied.
+	// Use our default directory if none was supplied or check if there's a "portable" file in the same directory.
 	if ( default_directory )
 	{
-		_SHGetFolderPathW( NULL, BASE_DIRECTORY_FLAG, NULL, 0, base_directory );
-
-		base_directory_length = lstrlenW( base_directory );
-		_wmemcpy_s( base_directory + base_directory_length, MAX_PATH - base_directory_length, L"\\VZ Enhanced 56K\0", 17 );
-		base_directory_length += 16;
+		base_directory_length = GetModuleFileNameW( NULL, base_directory, MAX_PATH );
+		while ( base_directory_length != 0 && base_directory[ --base_directory_length ] != L'\\' );
 		base_directory[ base_directory_length ] = 0;	// Sanity.
+		_wmemcpy_s( base_directory + base_directory_length, MAX_PATH - base_directory_length, L"\\portable\0", 10 );
 
-		// Check to see if the new path exists and create it if it doesn't.
+		// If there's a portable file in the same directory, then we'll use that directory as our base.
+		// If not, then we'll use the APPDATA folder.
 		if ( GetFileAttributesW( base_directory ) == INVALID_FILE_ATTRIBUTES )
 		{
-			CreateDirectoryW( base_directory, NULL );
+			_SHGetFolderPathW( NULL, BASE_DIRECTORY_FLAG, NULL, 0, base_directory );
+
+			base_directory_length = lstrlenW( base_directory );
+			_wmemcpy_s( base_directory + base_directory_length, MAX_PATH - base_directory_length, L"\\VZ Enhanced 56K\0", 17 );
+			base_directory_length += 16;
+			base_directory[ base_directory_length ] = 0;	// Sanity.
+
+			// Check to see if the new path exists and create it if it doesn't.
+			if ( GetFileAttributesW( base_directory ) == INVALID_FILE_ATTRIBUTES )
+			{
+				CreateDirectoryW( base_directory, NULL );
+			}
+		}
+		else
+		{
+			base_directory[ base_directory_length ] = 0;	// Sanity.
 		}
 	}
 
@@ -249,7 +284,7 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 	if ( cfg_recording != NULL )
 	{
 		wchar_t *file_name = GetFileNameW( cfg_recording );
-		default_recording = ( ringtoneinfo * )dllrbt_find( recording_list, ( void * )file_name, true );
+		default_recording = ( ringtone_info * )dllrbt_find( recording_list, ( void * )file_name, true );
 	}
 
 	ringtone_list = dllrbt_create( dllrbt_compare_w );
@@ -261,22 +296,38 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 	if ( cfg_popup_ringtone != NULL )
 	{
 		wchar_t *file_name = GetFileNameW( cfg_popup_ringtone );
-		default_ringtone = ( ringtoneinfo * )dllrbt_find( ringtone_list, ( void * )file_name, true );
+		default_ringtone = ( ringtone_info * )dllrbt_find( ringtone_list, ( void * )file_name, true );
 	}
+
+	_wmemcpy_s( base_directory + base_directory_length, MAX_PATH - base_directory_length, L"\\allow_phone_numbers\0", 21 );
+	base_directory[ base_directory_length + 20 ] = 0;	// Sanity.
+
+	allow_list = dllrbt_create( dllrbt_compare_w );
+
+	read_allow_ignore_list( base_directory, allow_list, LIST_TYPE_ALLOW );
+
+	_wmemcpy_s( base_directory + base_directory_length, MAX_PATH - base_directory_length, L"\\allow_caller_id_names\0", 23 );
+	base_directory[ base_directory_length + 22 ] = 0;	// Sanity.
+
+	allow_cid_list = dllrbt_create( dllrbt_icid_compare );
+
+	read_allow_ignore_cid_list( base_directory, allow_cid_list, LIST_TYPE_ALLOW );
+
+	//
 
 	_wmemcpy_s( base_directory + base_directory_length, MAX_PATH - base_directory_length, L"\\ignore_phone_numbers\0", 22 );
 	base_directory[ base_directory_length + 21 ] = 0;	// Sanity.
 
-	ignore_list = dllrbt_create( dllrbt_compare_a );
+	ignore_list = dllrbt_create( dllrbt_compare_w );
 
-	read_ignore_list( base_directory, ignore_list );
+	read_allow_ignore_list( base_directory, ignore_list, LIST_TYPE_IGNORE );
 
 	_wmemcpy_s( base_directory + base_directory_length, MAX_PATH - base_directory_length, L"\\ignore_caller_id_names\0", 24 );
 	base_directory[ base_directory_length + 23 ] = 0;	// Sanity.
 
 	ignore_cid_list = dllrbt_create( dllrbt_icid_compare );
 
-	read_ignore_cid_list( base_directory, ignore_cid_list );
+	read_allow_ignore_cid_list( base_directory, ignore_cid_list, LIST_TYPE_IGNORE );
 
 	_wmemcpy_s( base_directory + base_directory_length, MAX_PATH - base_directory_length, L"\\contact_list\0", 14 );
 	base_directory[ base_directory_length + 13 ] = 0;	// Sanity.
@@ -285,37 +336,20 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 
 	read_contact_list( base_directory, contact_list );
 
-	// Create a tree of linked lists. Each linked list contains a list of displayinfo structs that share the same "call from" phone number.
-	call_log = dllrbt_create( dllrbt_compare_a );
+	// Create a tree of linked lists. Each linked list contains a list of display_info structs that share the same "call from" phone number.
+	call_log = dllrbt_create( dllrbt_compare_w );
 
-	if ( cfg_popup_font_face1 == NULL )
+	for ( char i = 0; i < 3; ++i )
 	{
-		cfg_popup_font_face1 = GlobalStrDupW( ncm.lfMessageFont.lfFaceName );
-		cfg_popup_font_height1 = ncm.lfMessageFont.lfHeight;
-		cfg_popup_font_weight1 = ncm.lfMessageFont.lfWeight;
-		cfg_popup_font_italic1 = ncm.lfMessageFont.lfItalic;
-		cfg_popup_font_underline1 = ncm.lfMessageFont.lfUnderline;
-		cfg_popup_font_strikeout1 = ncm.lfMessageFont.lfStrikeOut;
-	}
-
-	if ( cfg_popup_font_face2 == NULL )
-	{
-		cfg_popup_font_face2 = GlobalStrDupW( ncm.lfMessageFont.lfFaceName );
-		cfg_popup_font_height2 = ncm.lfMessageFont.lfHeight;
-		cfg_popup_font_weight2 = ncm.lfMessageFont.lfWeight;
-		cfg_popup_font_italic2 = ncm.lfMessageFont.lfItalic;
-		cfg_popup_font_underline2 = ncm.lfMessageFont.lfUnderline;
-		cfg_popup_font_strikeout2 = ncm.lfMessageFont.lfStrikeOut;
-	}
-
-	if ( cfg_popup_font_face3 == NULL )
-	{
-		cfg_popup_font_face3 = GlobalStrDupW( ncm.lfMessageFont.lfFaceName );
-		cfg_popup_font_height3 = ncm.lfMessageFont.lfHeight;
-		cfg_popup_font_weight3 = ncm.lfMessageFont.lfWeight;
-		cfg_popup_font_italic3 = ncm.lfMessageFont.lfItalic;
-		cfg_popup_font_underline3 = ncm.lfMessageFont.lfUnderline;
-		cfg_popup_font_strikeout3 = ncm.lfMessageFont.lfStrikeOut;
+		if ( g_popup_info[ i ]->font_face == NULL )
+		{
+			g_popup_info[ i ]->font_face = GlobalStrDupW( ncm.lfMessageFont.lfFaceName );
+			g_popup_info[ i ]->font_height = ncm.lfMessageFont.lfHeight;
+			g_popup_info[ i ]->font_weight = ncm.lfMessageFont.lfWeight;
+			g_popup_info[ i ]->font_italic = ncm.lfMessageFont.lfItalic;
+			g_popup_info[ i ]->font_underline = ncm.lfMessageFont.lfUnderline;
+			g_popup_info[ i ]->font_strikeout = ncm.lfMessageFont.lfStrikeOut;
+		}
 	}
 
 	// Initialize our window class.
@@ -328,7 +362,7 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 	wcex.hInstance      = hInstance;
 	wcex.hIcon          = _LoadIconW( hInstance, MAKEINTRESOURCE( IDI_ICON ) );
 	wcex.hCursor        = _LoadCursorW( NULL, IDC_ARROW );
-	wcex.hbrBackground  = ( HBRUSH )( COLOR_WINDOW );
+	wcex.hbrBackground  = ( HBRUSH )( COLOR_3DFACE + 1 );
 	wcex.lpszMenuName   = NULL;
 	wcex.hIconSm        = NULL;
 
@@ -351,8 +385,8 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 		goto CLEANUP;
 	}
 
-	wcex.lpfnWndProc    = ColumnsWndProc;
-	wcex.lpszClassName  = L"columns";
+	wcex.lpfnWndProc    = SearchWndProc;
+	wcex.lpszClassName  = L"search";
 
 	if ( !_RegisterClassExW( &wcex ) )
 	{
@@ -418,43 +452,7 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 	wcex.cbWndExtra		= 0;
 	wcex.hIcon			= NULL;
 	wcex.hIconSm		= NULL;
-	wcex.hbrBackground  = ( HBRUSH )( COLOR_WINDOWFRAME );//( HBRUSH )( _GetStockObject( WHITE_BRUSH ) );
-	
-	wcex.lpfnWndProc    = CallLogColumnsWndProc;
-	wcex.lpszClassName  = L"calllog_columns";
-
-	if ( !_RegisterClassExW( &wcex ) )
-	{
-		fail_type = 1;
-		goto CLEANUP;
-	}
-
-	wcex.lpfnWndProc    = ContactListColumnsWndProc;
-	wcex.lpszClassName  = L"contactlist_columns";
-
-	if ( !_RegisterClassExW( &wcex ) )
-	{
-		fail_type = 1;
-		goto CLEANUP;
-	}
-
-	wcex.lpfnWndProc    = IgnoreListColumnsWndProc;
-	wcex.lpszClassName  = L"ignorelist_columns";
-
-	if ( !_RegisterClassExW( &wcex ) )
-	{
-		fail_type = 1;
-		goto CLEANUP;
-	}
-
-	wcex.lpfnWndProc    = ConnectionTabWndProc;
-	wcex.lpszClassName  = L"connection_tab";
-
-	if ( !_RegisterClassExW( &wcex ) )
-	{
-		fail_type = 1;
-		goto CLEANUP;
-	}
+	wcex.hbrBackground  = ( HBRUSH )( COLOR_WINDOW + 1 );
 
 	wcex.lpfnWndProc    = ModemTabWndProc;
 	wcex.lpszClassName  = L"modem_tab";
@@ -532,12 +530,28 @@ CLEANUP:
 	// Save before we exit.
 	save_config();
 
+	if ( allow_list_changed )
+	{
+		_wmemcpy_s( base_directory + base_directory_length, MAX_PATH - base_directory_length, L"\\allow_phone_numbers\0", 21 );
+		base_directory[ base_directory_length + 20 ] = 0;	// Sanity.
+
+		save_allow_ignore_list( base_directory, allow_list, LIST_TYPE_ALLOW );
+	}
+
+	if ( allow_cid_list_changed )
+	{
+		_wmemcpy_s( base_directory + base_directory_length, MAX_PATH - base_directory_length, L"\\allow_caller_id_names\0", 23 );
+		base_directory[ base_directory_length + 22 ] = 0;	// Sanity.
+
+		save_allow_ignore_cid_list( base_directory, allow_cid_list, LIST_TYPE_ALLOW );
+	}
+
 	if ( ignore_list_changed )
 	{
 		_wmemcpy_s( base_directory + base_directory_length, MAX_PATH - base_directory_length, L"\\ignore_phone_numbers\0", 22 );
 		base_directory[ base_directory_length + 21 ] = 0;	// Sanity.
 
-		save_ignore_list( base_directory );
+		save_allow_ignore_list( base_directory, ignore_list, LIST_TYPE_IGNORE );
 	}
 
 	if ( ignore_cid_list_changed )
@@ -545,7 +559,7 @@ CLEANUP:
 		_wmemcpy_s( base_directory + base_directory_length, MAX_PATH - base_directory_length, L"\\ignore_caller_id_names\0", 24 );
 		base_directory[ base_directory_length + 23 ] = 0;	// Sanity.
 
-		save_ignore_cid_list( base_directory );
+		save_allow_ignore_cid_list( base_directory, ignore_cid_list, LIST_TYPE_IGNORE );
 	}
 
 	if ( contact_list_changed )
@@ -561,19 +575,12 @@ CLEANUP:
 		GlobalFree( cfg_recording );
 	}
 
-	if ( cfg_popup_font_face1 != NULL )
+	for ( char i = 0; i < 3; ++i )
 	{
-		GlobalFree( cfg_popup_font_face1 );
-	}
-
-	if ( cfg_popup_font_face2 != NULL )
-	{
-		GlobalFree( cfg_popup_font_face2 );
-	}
-
-	if ( cfg_popup_font_face3 != NULL )
-	{
-		GlobalFree( cfg_popup_font_face3 );
+		if ( g_popup_info[ i ]->font_face != NULL )
+		{
+			GlobalFree( g_popup_info[ i ]->font_face );
+		}
 	}
 
 	if ( cfg_popup_ringtone != NULL )
@@ -585,7 +592,7 @@ CLEANUP:
 	node_type *node = dllrbt_get_head( modem_list );
 	while ( node != NULL )
 	{
-		modeminfo *mi = ( modeminfo * )node->val;
+		modem_info *mi = ( modem_info * )node->val;
 
 		if ( mi != NULL )
 		{
@@ -603,7 +610,7 @@ CLEANUP:
 	node = dllrbt_get_head( recording_list );
 	while ( node != NULL )
 	{
-		ringtoneinfo *rti = ( ringtoneinfo * )node->val;
+		ringtone_info *rti = ( ringtone_info * )node->val;
 
 		if ( rti != NULL )
 		{
@@ -622,7 +629,7 @@ CLEANUP:
 	node = dllrbt_get_head( ringtone_list );
 	while ( node != NULL )
 	{
-		ringtoneinfo *rti = ( ringtoneinfo * )node->val;
+		ringtone_info *rti = ( ringtone_info * )node->val;
 
 		if ( rti != NULL )
 		{
@@ -637,15 +644,51 @@ CLEANUP:
 	dllrbt_delete_recursively( ringtone_list );
 	ringtone_list = NULL;
 
+	// Free the values of the allow_list.
+	node = dllrbt_get_head( allow_list );
+	while ( node != NULL )
+	{
+		allow_ignore_info *aii = ( allow_ignore_info * )node->val;
+
+		if ( aii != NULL )
+		{
+			free_allowignoreinfo( &aii );
+		}
+
+		node = node->next;
+	}
+
+	dllrbt_delete_recursively( allow_list );
+	allow_list = NULL;
+
+	// Free the values of the allow_cid_list.
+	node = dllrbt_get_head( allow_cid_list );
+	while ( node != NULL )
+	{
+		allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )node->val;
+
+		if ( aicidi != NULL )
+		{
+			free_allowignorecidinfo( &aicidi );
+		}
+
+		node = node->next;
+	}
+
+	dllrbt_delete_recursively( allow_cid_list );
+	allow_cid_list = NULL;
+
+	//
+
 	// Free the values of the ignore_list.
 	node = dllrbt_get_head( ignore_list );
 	while ( node != NULL )
 	{
-		ignoreinfo *ii = ( ignoreinfo * )node->val;
+		allow_ignore_info *aii = ( allow_ignore_info * )node->val;
 
-		if ( ii != NULL )
+		if ( aii != NULL )
 		{
-			free_ignoreinfo( &ii );
+			free_allowignoreinfo( &aii );
 		}
 
 		node = node->next;
@@ -658,11 +701,11 @@ CLEANUP:
 	node = dllrbt_get_head( ignore_cid_list );
 	while ( node != NULL )
 	{
-		ignorecidinfo *icidi = ( ignorecidinfo * )node->val;
+		allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )node->val;
 
-		if ( icidi != NULL )
+		if ( aicidi != NULL )
 		{
-			free_ignorecidinfo( &icidi );
+			free_allowignorecidinfo( &aicidi );
 		}
 
 		node = node->next;
@@ -675,7 +718,7 @@ CLEANUP:
 	node = dllrbt_get_head( contact_list );
 	while ( node != NULL )
 	{
-		contactinfo *ci = ( contactinfo * )node->val;
+		contact_info *ci = ( contact_info * )node->val;
 
 		if ( ci != NULL )
 		{
@@ -700,7 +743,7 @@ CLEANUP:
 
 			di_node = di_node->next;
 
-			// del_di_node->data contained our displayinfo structs which we freed in wnd_proc_main's WM_DESTROY_ALT.
+			// del_di_node->data contained our display_info structs which we freed in wnd_proc_main's WM_DESTROY_ALT.
 			GlobalFree( del_di_node );
 		}
 
@@ -709,6 +752,12 @@ CLEANUP:
 
 	dllrbt_delete_recursively( call_log );
 	call_log = NULL;
+
+	for ( char i = 0; i < 16; ++i )
+	{
+		RangeDelete( &allow_range_list[ i ] );
+		allow_range_list[ i ] = NULL;
+	}
 
 	for ( char i = 0; i < 16; ++i )
 	{
@@ -783,6 +832,9 @@ CLEANUP:
 
 UNLOAD_DLLS:
 
+	#ifndef PCRE2_USE_STATIC_LIB
+		UnInitializePCRE2();
+	#endif
 	#ifndef SHELL32_USE_STATIC_LIB
 		UnInitializeShell32();
 	#endif

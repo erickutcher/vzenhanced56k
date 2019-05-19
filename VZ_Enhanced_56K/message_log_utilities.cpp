@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -119,7 +119,7 @@ void cleanup_message_log_queue()
 void cleanup_message_log()
 {
 	// Get the number of items in the listview.
-	int num_items = _SendMessageW( g_hWnd_message_log_list, LVM_GETITEMCOUNT, 0, 0 );
+	int num_items = ( int )_SendMessageW( g_hWnd_message_log_list, LVM_GETITEMCOUNT, 0, 0 );
 
 	LVITEM lvi;
 	_memzero( &lvi, sizeof( LVITEM ) );
@@ -236,7 +236,7 @@ THREAD_RETURN MessageLogManager( void *pArguments )
 				break;
 			}
 
-			int item_count = _SendMessageW( g_hWnd_message_log_list, LVM_GETITEMCOUNT, 0, 0 );
+			int item_count = ( int )_SendMessageW( g_hWnd_message_log_list, LVM_GETITEMCOUNT, 0, 0 );
 
 			// Truncate the number of items.
 			if ( ( item_count > 0 ) && ( item_count >= MAX_ITEM_COUNT ) )
@@ -257,7 +257,7 @@ THREAD_RETURN MessageLogManager( void *pArguments )
 						lvi.iItem = item_count - ( MAX_ITEM_COUNT - 1 );
 					}
 
-					BOOL test = _SendMessageW( g_hWnd_message_log_list, LVM_GETITEM, 0, ( LPARAM )&lvi );
+					_SendMessageW( g_hWnd_message_log_list, LVM_GETITEM, 0, ( LPARAM )&lvi );
 
 					MESSAGE_LOG_INFO *mli = ( MESSAGE_LOG_INFO * )lvi.lParam;
 					if ( mli != NULL )
@@ -374,8 +374,8 @@ THREAD_RETURN copy_message_log( void *pArguments )
 	lvi.mask = LVIF_PARAM;
 	lvi.iItem = -1;	// Set this to -1 so that the LVM_GETNEXTITEM call can go through the list correctly.
 
-	int item_count = _SendMessageW( g_hWnd_message_log_list, LVM_GETITEMCOUNT, 0, 0 );
-	int sel_count = _SendMessageW( g_hWnd_message_log_list, LVM_GETSELECTEDCOUNT, 0, 0 );
+	int item_count = ( int )_SendMessageW( g_hWnd_message_log_list, LVM_GETITEMCOUNT, 0, 0 );
+	int sel_count = ( int )_SendMessageW( g_hWnd_message_log_list, LVM_GETSELECTEDCOUNT, 0, 0 );
 	
 	bool copy_all = false;
 	if ( item_count == sel_count )
@@ -412,7 +412,7 @@ THREAD_RETURN copy_message_log( void *pArguments )
 		}
 		else
 		{
-			lvi.iItem = _SendMessageW( g_hWnd_message_log_list, LVM_GETNEXTITEM, lvi.iItem, LVNI_SELECTED );
+			lvi.iItem = ( int )_SendMessageW( g_hWnd_message_log_list, LVM_GETNEXTITEM, lvi.iItem, LVNI_SELECTED );
 		}
 
 		_SendMessageW( g_hWnd_message_log_list, LVM_GETITEM, 0, ( LPARAM )&lvi );
@@ -559,7 +559,7 @@ void save_message_log_csv_file( wchar_t *file_path )
 		WriteFile( hFile_message_log, "\xEF\xBB\xBF\"Date and Time (UTC)\",\"Level\",\"Message\"", 42, &write, NULL );
 
 		// Get the number of items in the listview.
-		int num_items = _SendMessageW( g_hWnd_message_log_list, LVM_GETITEMCOUNT, 0, 0 );
+		int num_items = ( int )_SendMessageW( g_hWnd_message_log_list, LVM_GETITEMCOUNT, 0, 0 );
 
 		LVITEM lvi;
 		_memzero( &lvi, sizeof( LVITEM ) );

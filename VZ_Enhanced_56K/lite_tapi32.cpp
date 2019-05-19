@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -26,8 +26,8 @@
 	plineGetDevCapsW	_lineGetDevCapsW;
 	plineOpenW			_lineOpenW;
 	plineGetMessage		_lineGetMessage;
-	plineGetCallInfoA	_lineGetCallInfoA;
-	//plineGetCallInfoW	_lineGetCallInfoW;
+	//plineGetCallInfoA	_lineGetCallInfoA;
+	plineGetCallInfoW	_lineGetCallInfoW;
 	plineAnswer			_lineAnswer;
 	plineDrop			_lineDrop;
 	plineDeallocateCall	_lineDeallocateCall;
@@ -63,8 +63,8 @@
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_tapi32, ( void ** )&_lineGetDevCapsW, "lineGetDevCapsW" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_tapi32, ( void ** )&_lineOpenW, "lineOpenW" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_tapi32, ( void ** )&_lineGetMessage, "lineGetMessage" ) )
-		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_tapi32, ( void ** )&_lineGetCallInfoA, "lineGetCallInfoA" ) )
-		//VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_tapi32, ( void ** )&_lineGetCallInfoW, "lineGetCallInfoW" ) )
+		//VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_tapi32, ( void ** )&_lineGetCallInfoA, "lineGetCallInfoA" ) )
+		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_tapi32, ( void ** )&_lineGetCallInfoW, "lineGetCallInfoW" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_tapi32, ( void ** )&_lineAnswer, "lineAnswer" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_tapi32, ( void ** )&_lineDrop, "lineDrop" ) )
 		VALIDATE_FUNCTION_POINTER( SetFunctionPointer( hModule_tapi32, ( void ** )&_lineDeallocateCall, "lineDeallocateCall" ) )

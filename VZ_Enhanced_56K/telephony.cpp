@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -161,7 +161,7 @@ void HandleIncomingCallerID( HCALL call, LINECALLINFO *lci )
 	SYSTEMTIME SystemTime;
 	FILETIME FileTime;
 
-	_lineGetCallInfoA( call, lci );
+	_lineGetCallInfoW( call, lci );
 
 	// Use caller ID name/number pairs of the following.
 	if ( ( ( lci->dwCallerIDFlags & LINECALLPARTYID_NAME ) && ( lci->dwCallerIDFlags & LINECALLPARTYID_ADDRESS ) ) ||
@@ -199,49 +199,49 @@ void HandleIncomingCallerID( HCALL call, LINECALLINFO *lci )
 			GetLocalTime( &SystemTime );
 			SystemTimeToFileTime( &SystemTime, &FileTime );
 
-			displayinfo *di = ( displayinfo * )GlobalAlloc( GPTR, sizeof( displayinfo ) );
+			display_info *di = ( display_info * )GlobalAlloc( GPTR, sizeof( display_info ) );
 
 			// I don't see why this can't show up for BLOCKED, OUTOFAREA, and UNAVAIL.
 			if ( ( lci->dwCallerIDFlags & LINECALLPARTYID_ADDRESS ) && lci->dwCallerIDSize > 1 )	// Ignore the empty string if that's all we get.
 			{
-				di->ci.call_from = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * lci->dwCallerIDSize );
-				_memcpy_s( di->ci.call_from, sizeof( char ) * lci->dwCallerIDSize, ( char * )lci + lci->dwCallerIDOffset, sizeof( char ) * lci->dwCallerIDSize );
-				di->ci.call_from[ lci->dwCallerIDSize - 1 ] = 0;	// Sanity.
+				di->phone_number = ( wchar_t * )GlobalAlloc( GMEM_FIXED, lci->dwCallerIDSize );
+				_memcpy_s( di->phone_number, lci->dwCallerIDSize, ( char * )lci + lci->dwCallerIDOffset, lci->dwCallerIDSize );
+				di->phone_number[ lci->dwCallerIDSize - 1 ] = 0;	// Sanity.
 			}
 
 			if ( ( lci->dwCallerIDFlags & LINECALLPARTYID_NAME ) && lci->dwCallerIDNameSize > 1 )	// Ignore the empty string if that's all we get.
 			{
-				di->ci.caller_id = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * lci->dwCallerIDNameSize );
-				_memcpy_s( di->ci.caller_id, sizeof( char ) * lci->dwCallerIDNameSize, ( char * )lci + lci->dwCallerIDNameOffset, sizeof( char ) * lci->dwCallerIDNameSize );
-				di->ci.caller_id[ lci->dwCallerIDNameSize - 1 ] = 0;	// Sanity.
+				di->caller_id = ( wchar_t * )GlobalAlloc( GMEM_FIXED, lci->dwCallerIDNameSize );
+				_memcpy_s( di->caller_id, lci->dwCallerIDNameSize, ( char * )lci + lci->dwCallerIDNameOffset, lci->dwCallerIDNameSize );
+				di->caller_id[ lci->dwCallerIDNameSize - 1 ] = 0;	// Sanity.
 
-				if ( di->ci.call_from == NULL )
+				if ( di->phone_number == NULL )
 				{
-					di->ci.call_from = GlobalStrDupA( "Unavailable" );
+					di->phone_number = GlobalStrDupW( L"Unavailable" );
 				}
 			}
 			else if ( lci->dwCallerIDFlags & LINECALLPARTYID_BLOCKED )
 			{
-				di->ci.caller_id = GlobalStrDupA( "PRIVATE" );
-				if ( di->ci.call_from == NULL )
+				di->caller_id = GlobalStrDupW( L"PRIVATE" );
+				if ( di->phone_number == NULL )
 				{
-					di->ci.call_from = GlobalStrDupA( "PRIVATE" );
+					di->phone_number = GlobalStrDupW( L"PRIVATE" );
 				}
 			}
 			else if ( lci->dwCallerIDFlags & LINECALLPARTYID_OUTOFAREA )
 			{
-				di->ci.caller_id = GlobalStrDupA( "Out of Area" );
-				if ( di->ci.call_from == NULL )
+				di->caller_id = GlobalStrDupW( L"Out of Area" );
+				if ( di->phone_number == NULL )
 				{
-					di->ci.call_from = GlobalStrDupA( "Out of Area" );
+					di->phone_number = GlobalStrDupW( L"Out of Area" );
 				}
 			}
 			else// if ( lci->dwCallerIDFlags & LINECALLPARTYID_UNAVAIL )
 			{
-				di->ci.caller_id = GlobalStrDupA( "Unavailable" );
-				if ( di->ci.call_from == NULL )
+				di->caller_id = GlobalStrDupW( L"Unavailable" );
+				if ( di->phone_number == NULL )
 				{
-					di->ci.call_from = GlobalStrDupA( "Unavailable" );
+					di->phone_number = GlobalStrDupW( L"Unavailable" );
 				}
 			}
 
@@ -260,8 +260,8 @@ void HandleIncomingCallerID( HCALL call, LINECALLINFO *lci )
 			else
 			{
 				// This is all that's set above.
-				GlobalFree( di->ci.call_from );
-				GlobalFree( di->ci.caller_id );
+				GlobalFree( di->phone_number );
+				GlobalFree( di->caller_id );
 				GlobalFree( di );
 			}
 		}
@@ -538,7 +538,7 @@ bool InitializeTelephony()
 
 		if ( hLineDevCaps->dwMediaModes & LINEMEDIAMODE_DATAMODEM )
 		{
-			modeminfo *mi = ( modeminfo * )GlobalAlloc( GMEM_FIXED, sizeof( modeminfo ) );
+			modem_info *mi = ( modem_info * )GlobalAlloc( GMEM_FIXED, sizeof( modem_info ) );
 			mi->device_id = DeviceID;
 
 			mi->permanent_line_guid = hLineDevCaps->PermanentLineGuid;
@@ -571,7 +571,7 @@ bool InitializeTelephony()
 		node_type *node = dllrbt_get_head( modem_list );
 		if ( node != NULL )
 		{
-			default_modem = ( modeminfo * )node->val;
+			default_modem = ( modem_info * )node->val;
 		}
 
 		// If there was still no modem found, then exit the thread.

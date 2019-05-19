@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -40,7 +40,9 @@
 
 	#define _StrChrA			StrChrA
 	#define _StrStrA			StrStrA
+	#define _StrStrW			StrStrW
 	#define _StrStrIA			StrStrIA
+	#define _StrStrIW			StrStrIW
 
 	#define _StrCmpNA			StrCmpNA
 	#define _StrCmpNIA			StrCmpNIA
@@ -65,7 +67,9 @@
 
 	typedef PSTR ( WINAPI *pStrChrA )( PSTR pszStart, CHAR wMatch );
 	typedef PSTR ( WINAPI *pStrStrA )( PSTR pszFirst, PCSTR pszSrch );
+	typedef PWSTR ( WINAPI *pStrStrW )( PWSTR pszFirst, PCWSTR pszSrch );
 	typedef PSTR ( WINAPI *pStrStrIA )( PSTR pszFirst, PCSTR pszSrch );
+	typedef PSTR ( WINAPI *pStrStrIW )( PWSTR pszFirst, PCWSTR pszSrch );
 
 	typedef int ( WINAPI *pStrCmpNA )( PCSTR psz1, PCSTR psz2, int nChar );
 	typedef int ( WINAPI *pStrCmpNIA )( PCSTR psz1, PCSTR psz2, int nChar );
@@ -85,7 +89,9 @@
 
 	extern pStrChrA				_StrChrA;
 	extern pStrStrA				_StrStrA;
+	extern pStrStrW				_StrStrW;
 	extern pStrStrIA			_StrStrIA;
+	extern pStrStrIW			_StrStrIW;
 
 	extern pStrCmpNA			_StrCmpNA;
 	extern pStrCmpNIA			_StrCmpNIA;

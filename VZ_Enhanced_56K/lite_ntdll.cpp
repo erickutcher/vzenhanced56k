@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -155,7 +155,7 @@
 #endif
 
 //wchar_t * WINAPIV _wcsncpy_s( wchar_t *strDest, size_t size, const wchar_t *strSource, size_t count )
-wchar_t * WINAPI _wcsncpy_s( wchar_t *strDest, size_t size, const wchar_t *strSource, size_t count )
+wchar_t * WINAPI _wcsncpy_s( wchar_t *strDest, int size, const wchar_t *strSource, int count )
 {
 	if ( size < count )
 	{

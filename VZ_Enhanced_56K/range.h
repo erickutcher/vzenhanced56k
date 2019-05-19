@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -23,14 +23,14 @@ struct RANGE
 {
 	RANGE *next;
 	RANGE *child;
-	char value;
+	wchar_t value;
 };
 
-RANGE *RangeCreateNode( char value );
-void RangeAdd( RANGE **root, const char *value, int length );
-bool RangeRemove( RANGE **head, const char *value, RANGE *parent = NULL );
-bool RangeSearch( RANGE **head, const char *value, char found_value[ 32 ] );
-bool RangeCompare( const char *range, const char *value );
+RANGE *RangeCreateNode( wchar_t value );
+void RangeAdd( RANGE **root, const wchar_t *value, int length );
+bool RangeRemove( RANGE **head, const wchar_t *value, RANGE *parent = NULL );
+bool RangeSearch( RANGE **head, const wchar_t *value, wchar_t found_value[ 32 ] );
+bool RangeCompare( const wchar_t *range, const wchar_t *value );
 void RangeDelete( RANGE **head );
 
 #endif

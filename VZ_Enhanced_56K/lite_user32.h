@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -46,6 +46,7 @@
 	#define _DestroyMenu			DestroyMenu
 	#define _DestroyWindow			DestroyWindow
 	#define _DispatchMessageW		DispatchMessageW
+	#define _DrawEdge				DrawEdge
 	#define _DrawMenuBar			DrawMenuBar
 	#define _DrawTextW				DrawTextW
 	#define _EmptyClipboard			EmptyClipboard
@@ -59,17 +60,19 @@
 	#define _GetClipboardData		GetClipboardData
 	#define _GetCursorPos			GetCursorPos
 	#define _GetDC					GetDC
-	#define _GetDlgItem				GetDlgItem
+	//#define _GetDlgItem				GetDlgItem
 	#define _GetKeyState			GetKeyState
 	#define _GetMenuItemInfoW		GetMenuItemInfoW
 	#define _GetMessagePos			GetMessagePos
 	#define _GetMessageW			GetMessageW
 	#define _GetParent				GetParent
+	#define _GetScrollInfo			GetScrollInfo
 	#define _GetSubMenu				GetSubMenu
 	#define _GetSysColor			GetSysColor
 	#define _GetSysColorBrush		GetSysColorBrush
 	#define _GetSystemMetrics		GetSystemMetrics
-	#define _GetWindowLongW			GetWindowLongW
+	//#define _GetWindowLongW			GetWindowLongW
+	#define _GetWindowLongPtrW		GetWindowLongPtrW
 	#define _GetWindowRect			GetWindowRect
 	#define _InsertMenuItemW		InsertMenuItemW
 	#define _InvalidateRect			InvalidateRect
@@ -110,7 +113,8 @@
 	#define _SetScrollInfo			SetScrollInfo
 	#define _SetScrollPos			SetScrollPos
 	#define _SetTimer				SetTimer
-	#define _SetWindowLongW			SetWindowLongW
+	//#define _SetWindowLongW			SetWindowLongW
+	#define _SetWindowLongPtrW		SetWindowLongPtrW
 	#define _SetWindowPos			SetWindowPos
 	#define _SetWindowTextW			SetWindowTextW
 	#define _ShowWindow				ShowWindow
@@ -142,6 +146,7 @@
 	typedef BOOL ( WINAPI *pDestroyMenu )( HMENU hMenu );
 	typedef BOOL ( WINAPI *pDestroyWindow )( HWND hWnd );
 	typedef LRESULT ( WINAPI *pDispatchMessageW )( const MSG *lpmsg );
+	typedef BOOL ( WINAPI *pDrawEdge )( HDC hdc, LPRECT qrc, UINT edge, UINT grfFlags );
 	typedef BOOL ( WINAPI *pDrawMenuBar )( HWND hWnd );
 	typedef int ( WINAPI *pDrawTextW )( HDC hDC, LPCTSTR lpchText, int nCount, LPRECT lpRect, UINT uFormat );
 	typedef BOOL ( WINAPI *pEmptyClipboard )( void );
@@ -155,17 +160,19 @@
 	typedef HANDLE ( WINAPI *pGetClipboardData )( UINT uFormat );
 	typedef BOOL ( WINAPI *pGetCursorPos )( LPPOINT lpPoint );
 	typedef HDC ( WINAPI *pGetDC )( HWND hWnd );
-	typedef HWND ( WINAPI *pGetDlgItem )( HWND hDlg, int nIDDlgItem );
+	//typedef HWND ( WINAPI *pGetDlgItem )( HWND hDlg, int nIDDlgItem );
 	typedef SHORT ( WINAPI *pGetKeyState )( int nVirtKey );
 	typedef BOOL ( WINAPI *pGetMenuItemInfoW )( HMENU hMenu, UINT uItem, BOOL fByPosition, LPMENUITEMINFO lpmii );
 	typedef DWORD ( WINAPI *pGetMessagePos )( void );
 	typedef BOOL ( WINAPI *pGetMessageW )( LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax );
 	typedef HWND ( WINAPI *pGetParent )( HWND hWnd );
+	typedef BOOL ( WINAPI *pGetScrollInfo )( HWND hwnd, int nBar, LPSCROLLINFO lpsi );
 	typedef HMENU ( WINAPI *pGetSubMenu )( HMENU hMenu, int nPos );
 	typedef DWORD ( WINAPI *pGetSysColor )( int nIndex );
 	typedef HBRUSH ( WINAPI *pGetSysColorBrush )( int nIndex );
 	typedef int ( WINAPI *pGetSystemMetrics )( int nIndex );
-	typedef LONG ( WINAPI *pGetWindowLongW )( HWND hWnd, int nIndex );
+	//typedef LONG ( WINAPI *pGetWindowLongW )( HWND hWnd, int nIndex );
+	typedef LONG_PTR ( WINAPI *pGetWindowLongPtrW )( HWND hWnd, int nIndex );
 	typedef BOOL ( WINAPI *pGetWindowRect )( HWND hWnd, LPRECT lpRect );
 	typedef BOOL ( WINAPI *pInsertMenuItemW )( HMENU hMenu, UINT uItem, BOOL fByPosition, LPCMENUITEMINFO lpmii );
 	typedef BOOL ( WINAPI *pInvalidateRect )( HWND hWnd, const RECT *lpRect, BOOL bErase );
@@ -206,7 +213,8 @@
 	typedef int ( WINAPI *pSetScrollInfo )( HWND hwnd, int fnBar, LPCSCROLLINFO lpsi, BOOL fRedraw );
 	typedef int ( WINAPI *pSetScrollPos )( HWND hWnd, int nBar, int nPos, BOOL bRedraw );
 	typedef UINT_PTR ( WINAPI *pSetTimer )( HWND hWnd, UINT_PTR nIDEvent, UINT uElapse, TIMERPROC lpTimerFunc );
-	typedef LONG ( WINAPI *pSetWindowLongW )( HWND hWnd, int nIndex, LONG dwNewLong );
+	//typedef LONG ( WINAPI *pSetWindowLongW )( HWND hWnd, int nIndex, LONG dwNewLong );
+	typedef LONG_PTR ( WINAPI *pSetWindowLongPtrW )( HWND hWnd, int nIndex, LONG_PTR dwNewLong );
 	typedef BOOL ( WINAPI *pSetWindowPos )( HWND hWnd, HWND hWndInsertAfter, int X, int Y, int cx, int cy, UINT uFlags );
 	typedef BOOL ( WINAPI *pSetWindowTextW )( HWND hWnd, LPCTSTR lpString );
 	typedef BOOL ( WINAPI *pShowWindow )( HWND hWnd, int nCmdShow );
@@ -231,6 +239,7 @@
 	extern pDestroyMenu				_DestroyMenu;
 	extern pDestroyWindow			_DestroyWindow;
 	extern pDispatchMessageW		_DispatchMessageW;
+	extern pDrawEdge				_DrawEdge;
 	extern pDrawMenuBar				_DrawMenuBar;
 	extern pDrawTextW				_DrawTextW;
 	extern pEmptyClipboard			_EmptyClipboard;
@@ -241,20 +250,22 @@
 	extern pFillRect				_FillRect;
 	extern pFlashWindow				_FlashWindow;
 	extern pGetClientRect			_GetClientRect;
-	extern pGetClipboardData		_GetClipboardData
+	extern pGetClipboardData		_GetClipboardData;
 	extern pGetCursorPos			_GetCursorPos;
 	extern pGetDC					_GetDC;
-	extern pGetDlgItem				_GetDlgItem;
+	//extern pGetDlgItem				_GetDlgItem;
 	extern pGetKeyState				_GetKeyState;
 	extern pGetMenuItemInfoW		_GetMenuItemInfoW;
 	extern pGetMessagePos			_GetMessagePos;
 	extern pGetMessageW				_GetMessageW;
 	extern pGetParent				_GetParent;
+	extern pGetScrollInfo			_GetScrollInfo;
 	extern pGetSubMenu				_GetSubMenu;
 	extern pGetSysColor				_GetSysColor;
 	extern pGetSysColorBrush		_GetSysColorBrush;
 	extern pGetSystemMetrics		_GetSystemMetrics;
-	extern pGetWindowLongW			_GetWindowLongW;
+	//extern pGetWindowLongW			_GetWindowLongW;
+	extern pGetWindowLongPtrW		_GetWindowLongPtrW;
 	extern pGetWindowRect			_GetWindowRect;
 	extern pInsertMenuItemW			_InsertMenuItemW;
 	extern pInvalidateRect			_InvalidateRect;
@@ -295,7 +306,8 @@
 	extern pSetScrollInfo			_SetScrollInfo;
 	extern pSetScrollPos			_SetScrollPos;
 	extern pSetTimer				_SetTimer;
-	extern pSetWindowLongW			_SetWindowLongW;
+	//extern pSetWindowLongW			_SetWindowLongW;
+	extern pSetWindowLongPtrW		_SetWindowLongPtrW;
 	extern pSetWindowPos			_SetWindowPos;
 	extern pSetWindowTextW			_SetWindowTextW;
 	extern pShowWindow				_ShowWindow;

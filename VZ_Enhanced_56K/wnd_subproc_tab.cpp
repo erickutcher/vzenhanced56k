@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -36,31 +36,11 @@ RECT client_rc;
 bool size_changed = true;
 HBITMAP hbm_tab = NULL;
 
-wchar_t *GetTabTextByHandle( HWND hWnd )
-{
-	if ( hWnd == g_hWnd_call_log )
-	{
-		return ST_Call_Log;
-	}
-	else if ( hWnd == g_hWnd_contact_list )
-	{
-		return ST_Contact_List;
-	}
-	else if ( hWnd == g_hWnd_ignore_tab )
-	{
-		return ST_Ignore_Lists;
-	}
-	else
-	{
-		return L"";
-	}
-}
-
 // Subclassed tab control.
 // Allows tabs to be reordered by dragging them.
 LRESULT CALLBACK TabSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 {
-	switch( msg )
+	switch ( msg )
 	{
 		case WM_PROPAGATE:
 		{
@@ -123,7 +103,7 @@ LRESULT CALLBACK TabSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 		{
 			if ( tab_is_dragging )
 			{
-				int index = _SendMessageW( hWnd, TCM_GETCURSEL, 0, 0 );		// Get the selected tab
+				int index = ( int )_SendMessageW( hWnd, TCM_GETCURSEL, 0, 0 );		// Get the selected tab
 
 				// Only drag if it's over an item and not the currently selected item.
 				if ( cur_over >= 0 && cur_over != index )
@@ -144,14 +124,13 @@ LRESULT CALLBACK TabSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 					if ( new_index != index )
 					{
 						// Get the old tab.
+						wchar_t tab_text[ 64 ];
 						TCITEM tci;
 						_memzero( &tci, sizeof( TCITEM ) );
-						tci.mask = TCIF_PARAM;
-						_SendMessageW( hWnd, TCM_GETITEM, index, ( LPARAM )&tci );	// Get the tab's information
-
-						// Set the new tab.
 						tci.mask = TCIF_PARAM | TCIF_TEXT;
-						tci.pszText = GetTabTextByHandle( ( HWND )( tci.lParam ) );
+						tci.pszText = tab_text;
+						tci.cchTextMax = 64;
+						_SendMessageW( hWnd, TCM_GETITEM, index, ( LPARAM )&tci );	// Get the tab's information
 
 						// Delete the old tab.
 						_SendMessageW( hWnd, TCM_DELETEITEM, index, 0 );
@@ -229,7 +208,7 @@ LRESULT CALLBACK TabSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 			tcht.pt.y = ( tab_is_dragging ? tab_y_pos : GET_Y_LPARAM( lParam ) );
 			tcht.flags = TCHT_ONITEM;
 
-			cur_over = _SendMessageW( hWnd, TCM_HITTEST, 0, ( LPARAM )&tcht );
+			cur_over = ( int )_SendMessageW( hWnd, TCM_HITTEST, 0, ( LPARAM )&tcht );
 
 			if ( tab_is_dragging )
 			{
@@ -243,7 +222,7 @@ LRESULT CALLBACK TabSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 					}
 					else if ( cur_tab_x_pos > tab_x_pos )
 					{
-						cur_over = _SendMessageW( hWnd, TCM_GETITEMCOUNT, 0, 0 ) - 1;
+						cur_over = ( int )_SendMessageW( hWnd, TCM_GETITEMCOUNT, 0, 0 ) - 1;
 					}
 				}
 
@@ -253,7 +232,7 @@ LRESULT CALLBACK TabSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 					tab_moved = true;
 				}
 
-				int index = _SendMessageW( hWnd, TCM_GETCURSEL, 0, 0 );		// Get the selected tab
+				int index = ( int )_SendMessageW( hWnd, TCM_GETCURSEL, 0, 0 );		// Get the selected tab
 
 				// We're over an item while dragging and it's not the currently selected item.
 				if ( cur_over >= 0 && cur_over != index )
@@ -322,7 +301,7 @@ LRESULT CALLBACK TabSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 			_DeleteObject( ohbm );
 			
 			// Fill the background.
-			HBRUSH hBrush = _CreateSolidBrush( ( COLORREF )_GetSysColor( COLOR_MENU ) );
+			HBRUSH hBrush = _CreateSolidBrush( ( COLORREF )_GetSysColor( COLOR_3DFACE ) );
 			_FillRect( hdcMem, &client_rc, hBrush );
 			_DeleteObject( hBrush );
 
@@ -346,15 +325,18 @@ LRESULT CALLBACK TabSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 			// Delete our old font.
 			_DeleteObject( hf );
 
+			wchar_t tab_text[ 64 ];
 			TCITEM tci;
 			_memzero( &tci, sizeof( TCITEM ) );
-			tci.mask = TCIF_PARAM;
+			tci.mask = TCIF_PARAM | TCIF_TEXT;
+			tci.pszText = tab_text;
+			tci.cchTextMax = 64;
 
-			int index = _SendMessageW( hWnd, TCM_GETCURSEL, 0, 0 );	// Get the selected tab
+			int index = ( int )_SendMessageW( hWnd, TCM_GETCURSEL, 0, 0 );	// Get the selected tab
 
 			// Get the bounding rect for each tab item.
-			int tab_count = _SendMessageW( hWnd, TCM_GETITEMCOUNT, 0, 0 );
-			for ( int i = 0; i < tab_count; i++ )
+			int tab_count = ( int )_SendMessageW( hWnd, TCM_GETITEMCOUNT, 0, 0 );
+			for ( int i = 0; i < tab_count; ++i )
 			{
 				// Exclude the selected tab. We draw it last so it can clip the non-selected tabs.
 				if ( i != index )
@@ -399,10 +381,10 @@ LRESULT CALLBACK TabSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 						++rc_tab.top;
 
 						_SetBkMode( hdcMem, TRANSPARENT );
-						_SetTextColor( hdcMem, RGB( 0x00, 0x00, 0x00 ) );
+						_SetTextColor( hdcMem, _GetSysColor( COLOR_BTNTEXT ) );
 
 						_SendMessageW( hWnd, TCM_GETITEM, i, ( LPARAM )&tci );	// Get the tab's information.
-						_DrawTextW( hdcMem, GetTabTextByHandle( ( HWND )( tci.lParam ) ), -1, &rc_tab, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS );
+						_DrawTextW( hdcMem, tci.pszText, -1, &rc_tab, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS );
 					}
 				}
 			}
@@ -417,21 +399,20 @@ LRESULT CALLBACK TabSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 				rectangle.right = 0;
 				rectangle.top = rc_tab.top;
 				rectangle.bottom = rc_tab.bottom;
-				
-				HBRUSH hBrush = _CreateSolidBrush( ( COLORREF )_GetSysColor( COLOR_HOTLIGHT ) );
+
 				if ( drag_pos )	// Draw right anchor
 				{
 					rectangle.right = rc_tab.right + 1;
 					rectangle.left = rc_tab.right - 1;
-					_FillRect( hdcMem, &rectangle, hBrush );
 				}
 				else	// Draw left anchor
 				{
 					rectangle.right = rc_tab.left + 1;
 					rectangle.left = rc_tab.left - 1;
-					_FillRect( hdcMem, &rectangle, hBrush ); 
 				}
 
+				HBRUSH hBrush = _CreateSolidBrush( ( COLORREF )_GetSysColor( COLOR_HOTLIGHT ) );
+				_FillRect( hdcMem, &rectangle, hBrush ); 
 				_DeleteObject( hBrush );
 			}
 
@@ -468,11 +449,10 @@ LRESULT CALLBACK TabSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 				rc_text.bottom = rc_tab.bottom - 2;
 
 				_SetBkMode( hdcMem, TRANSPARENT );
-				_SetTextColor( hdcMem, RGB( 0x00, 0x00, 0x00 ) );
+				_SetTextColor( hdcMem, _GetSysColor( COLOR_BTNTEXT ) );
 
 				_SendMessageW( hWnd, TCM_GETITEM, index, ( LPARAM )&tci );	// Get the tab's information.
-				wchar_t *tab_text = GetTabTextByHandle( ( HWND )( tci.lParam ) );
-				_DrawTextW( hdcMem, tab_text, -1, &rc_text, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS );
+				_DrawTextW( hdcMem, tci.pszText, -1, &rc_text, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS );
 
 				// Draw the transparent selected tab on top of everything else.
 				if ( tab_is_dragging && tab_moved )
@@ -513,9 +493,9 @@ LRESULT CALLBACK TabSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 					rc_text.bottom = rc_tab.bottom - rc_tab.top;
 
 					_SetBkMode( hdcMem2, TRANSPARENT );
-					_SetTextColor( hdcMem2, RGB( 0xFF, 0xFF, 0xFF ) );
+					_SetTextColor( hdcMem2, _GetSysColor( COLOR_WINDOW ) );
 
-					_DrawTextW( hdcMem2, tab_text, -1, &rc_text, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS );
+					_DrawTextW( hdcMem2, tci.pszText, -1, &rc_text, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS );
 
 					BLENDFUNCTION blend;
 					blend.BlendOp = AC_SRC_OVER;
@@ -559,7 +539,7 @@ LRESULT CALLBACK TabSubProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 				UnInitializeUXTheme();
 			#endif
 
-			return 0;
+			//return 0;
 		}
 		break;
 	}

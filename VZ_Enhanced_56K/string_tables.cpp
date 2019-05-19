@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -55,17 +55,26 @@ wchar_t *menu_string_table[] =
 	L"&Help",
 	L"&Options...",
 	L"&Save Call Log...",
+	L"&Search...",
 	L"&Tools",
 	L"&View",
 	L"Add Contact...",
+	L"Add to Allow Caller ID Name List...",
+	L"Add to Allow Phone Number List",
+	L"Add to Allow Phone Number List...",
 	L"Add to Ignore Caller ID Name List...",
 	L"Add to Ignore Phone Number List",
 	L"Add to Ignore Phone Number List...",
+	L"Allow and Ignore Lists",
 	L"Cancel Import",
 	/*L"Cancel Update Download",*/
 	L"Check for &Updates",
 	L"Close Tab",
 	L"Contacts",
+	L"Copy Allow Caller ID Name State",
+	L"Copy Allow Caller ID Name States",
+	L"Copy Allow Phone Number State",
+	L"Copy Allow Phone Number States",
 	L"Copy Caller ID Name",
 	L"Copy Caller ID Names",
 	L"Copy Cell Phone Number",
@@ -90,6 +99,7 @@ wchar_t *menu_string_table[] =
 	L"Copy Ignore Phone Number States",
 	L"Copy Job Title",
 	L"Copy Job Titles",
+	L"Copy Last Called",
 	L"Copy Last Name",
 	L"Copy Last Names",
 	L"Copy Match Case State",
@@ -108,6 +118,8 @@ wchar_t *menu_string_table[] =
 	L"Copy Professions",
 	L"Copy Reference",
 	L"Copy References",
+	L"Copy Regular Expression",
+	L"Copy Regular Expressions",
 	L"Copy Selected",
 	L"Copy Sent to Phone Number",
 	L"Copy Sent to Phone Numbers",
@@ -119,37 +131,40 @@ wchar_t *menu_string_table[] =
 	L"Copy Work Phone Number",
 	L"Copy Work Phone Numbers",
 	L"E&xit",
+	L"Edit Allow Caller ID Name List Entry...",
+	L"Edit Allow Phone Number List Entry...",
 	L"Edit Contact...",
 	L"Edit Ignore Caller ID Name List Entry...",
+	L"Edit Ignore Phone Number List Entry...",
 	L"Exit",
 	L"Export...",
 	L"Export Contacts...",
 	L"Ignore Incoming Call",
-	/*L"Ignore Lists",*/
 	L"Import...",
 	L"Import Contacts...",
 	L"Open VZ Enhanced 56K",
 	L"Open Web Page",
 	L"Options...",
 	L"Remove Contact",
+	L"Remove from Allow Caller ID Name List",
+	L"Remove from Allow Phone Number List",
 	L"Remove from Ignore Caller ID Name List",
 	L"Remove from Ignore Phone Number List",
 	L"Remove Selected",
 	L"Search with",
 	L"Select All",
-	L"Select &Columns...",
-	L"Select Columns...",
 	L"Send Email...",
 	L"Tabs",
 	L"VZ Enhanced 56K &Home Page"
 };
 
-wchar_t *search_string_table[] =
+wchar_t *search_with_string_table[] =
 {
 	L"800Notes",
 	L"Bing",
 	L"Callerr",
 	L"Google",
+	L"Nomorobo",
 	L"OkCaller",
 	L"PhoneTray",
 	L"WhitePages",
@@ -162,18 +177,24 @@ wchar_t *common_message_string_table[] =
 	/*L"A new version of VZ Enhanced 56K is available.\r\n\r\nWould you like to download it now?",*/
 	L"Are you sure you want to remove the selected entries?",
 	L"Are you sure you want to remove the selected entries from the contact list?",
+	L"Are you sure you want to remove the selected entries from the allow caller ID name list?",
+	L"Are you sure you want to remove the selected entries from the allow phone number list?",
 	L"Are you sure you want to remove the selected entries from the ignore caller ID name list?",
 	L"Are you sure you want to remove the selected entries from the ignore phone number list?",
 	/*L"Area code is restricted.",*/
+	L"Caller ID name is already in the allow caller ID name list.",
 	L"Caller ID name is already in the ignore caller ID name list.",
 	L"Contact is already in the contact list.",
 	L"No voice / data modem was found on the system.",
+	L"Phone number is already in the allow phone number list.",
 	L"Phone number is already in the ignore phone number list.",
 	L"Please enter a valid caller ID name.",
 	L"Please enter a valid phone number.",
 	L"Popup windows and ringtones must be enable to play per-contact ringtones.\r\n\r\nWould you like to enable these settings?",
 	L"Ringtones must be enable to play per-contact ringtones.\r\n\r\nWould you like to enable this setting?",
 	L"There was an error while saving the settings.",
+	L"Selected caller ID name is allowed using multiple keywords.\r\n\r\nPlease remove it from the allow caller ID name list.",
+	L"Selected phone number is allowed using wildcard digit(s).\r\n\r\nPlease remove it from the allow phone number list.",
 	L"Selected caller ID name is ignored using multiple keywords.\r\n\r\nPlease remove it from the ignore caller ID name list.",
 	L"Selected phone number is ignored using wildcard digit(s).\r\n\r\nPlease remove it from the ignore phone number list.",
 	L"The download could not be completed.\r\n\r\nWould you like to visit the VZ Enhanced 56K home page instead?",
@@ -184,7 +205,6 @@ wchar_t *common_message_string_table[] =
 	L"Tree-View image list was not destroyed.",
 	L"Voice playback is not supported.",
 	/*L"VZ Enhanced 56K is up to date.",*/
-	L"You must have at least one column displayed.",
 	L"You must restart the program for this setting to take effect."
 };
 
@@ -253,12 +273,10 @@ wchar_t *options_string_table[] =
 	L"Center",
 	L"Check for updates upon startup",
 	L"Close to System Tray",
-	L"Connection",
 	L"Default modem:",
 	L"Default recording:",
 	L"Default ringtone:",
 	L"Delay Time (seconds):",
-	/*L"Down",*/
 	L"Drop answered calls after (seconds):",
 	L"Enable Call Log history",
 	L"Enable popup windows:",
@@ -281,28 +299,18 @@ wchar_t *options_string_table[] =
 	L"Play recording when call is answered",
 	L"Popup",
 	L"Preview Popup",
-	L"Reconnect upon connection loss:",
 	L"Recordings take priority if longer.",
 	L"Repeat recording:",
 	L"Retries:",
 	L"Right",
-	/*L"Sample:",*/
 	L"Screen Position:",
 	L"Show contact picture",
 	L"Show line:",
 	L"Silent startup",
-	L"SSL 2.0",
-	L"SSL 3.0",
-	L"SSL / TLS version:",
 	L"Time format:",
-	L"Timeout (seconds):",
-	L"TLS 1.0",
-	L"TLS 1.1",
-	L"TLS 1.2",
 	L"Top Left",
 	L"Top Right",
 	L"Transparency:",
-	/*L"Up",*/
 	L"Vertical",
 	L"Width (pixels):"
 };
@@ -310,6 +318,8 @@ wchar_t *options_string_table[] =
 wchar_t *call_log_string_table[] =
 {
 	L"#",
+	L"Allow Caller ID Name",
+	L"Allow Phone Number",
 	L"Caller ID Name",
 	L"Date and Time",
 	L"Ignore Caller ID Name",
@@ -338,19 +348,22 @@ wchar_t *contact_list_string_table[] =
 	L"Work Phone Number"
 };
 
-wchar_t *ignore_list_string_table[] =
+wchar_t *allow_ignore_list_string_table[] =
 {
 	L"#",
+	L"Last Called",
 	L"Phone Number",
 	L"Total Calls"
 };
 
-wchar_t *ignore_cid_list_string_table[] =
+wchar_t *allow_ignore_cid_list_string_table[] =
 {
 	L"#",
 	L"Caller ID Name",
+	L"Last Called",
 	L"Match Case",
 	L"Match Whole Word",
+	L"Regular Expression",
 	L"Total Calls"
 };
 
@@ -362,10 +375,21 @@ wchar_t *message_log_list_string_table[] =
 	L"Message"
 };
 
+wchar_t *search_string_table[] =
+{
+	L"Search All",
+	L"Search for:",
+	L"Search Next",
+	L"Search Type"
+};
+
 wchar_t *common_string_table[] =
 {
 	L"\xABmultiple caller ID names\xBB",
 	L"\xABmultiple phone numbers\xBB",
+	L"Allow Caller ID Name",
+	L"Allow Lists",
+	L"Allow Phone Number",
 	L"Call Log",
 	L"Caller ID Name",
 	L"Caller ID Names",
@@ -380,6 +404,7 @@ wchar_t *common_string_table[] =
 	L"Ignore Lists",
 	L"Ignore Phone Number",
 	L"Import",
+	L"Last Called",
 	L"Match case",
 	L"Match whole word",
 	L"Message Log",
@@ -389,11 +414,12 @@ wchar_t *common_string_table[] =
 	L"Phone Number",
 	L"Phone Numbers",
 	L"Phone Number:",
+	L"Regular expression",
 	L"Save Call Log",
 	L"Save Message Log...",
 	L"Save Message Log",
+	L"Search",
 	L"Select Columns",
-	L"Show columns:",
 	L"Time",
 	L"Total Calls",
 	L"Update Phone Number",
@@ -435,19 +461,29 @@ wchar_t *tapi_string_table[] =
 
 wchar_t *list_string_table[] =
 {
+	L"Added caller ID name to allow caller ID name list.",
+	L"Added caller ID name(s) to allow caller ID name list.",
 	L"Added caller ID name to ignore caller ID name list.",
 	L"Added caller ID name(s) to ignore caller ID name list.",
+	L"Added phone number to allow phone number list.",
+	L"Added phone number(s) to allow phone number list.",
 	L"Added phone number to ignore phone number list.",
 	L"Added phone number(s) to ignore phone number list.",
 	L"Automatic save has completed.",
+	L"Exported allow caller ID name list.",
+	L"Exported allow phone number list.",
 	L"Exported call log history.",
 	L"Exported contact list.",
 	L"Exported ignore caller ID name list.",
 	L"Exported ignore phone number list.",
+	L"Imported allow caller ID name list.",
+	L"Imported allow phone number list.",
 	L"Imported call log history.",
 	L"Imported contact list.",
 	L"Imported ignore caller ID name list.",
 	L"Imported ignore phone number list.",
+	L"Loaded allow caller ID name list.",
+	L"Loaded allow phone number list.",
 	L"Loaded call log history.",
 	L"Loaded ignore caller ID name list.",
 	L"Loaded ignore phone number list.",
@@ -455,9 +491,16 @@ wchar_t *list_string_table[] =
 	L"Loaded ringtone directory.",
 	L"Performing automatic save.",
 	L"Removed call log entry / entries.",
+	L"Removed caller ID name(s) from allow caller ID name list.",
+	L"Removed phone number(s) from allow phone number list.",
 	L"Removed caller ID name(s) from ignore caller ID name list.",
 	L"Removed phone number(s) from ignore phone number list.",
+	L"Updated allowed caller ID name.",
+	L"Updated allowed caller ID name's call count.",
+	L"Updated allowed phone number.",
+	L"Updated allowed phone number's call count.",
 	L"Updated ignored caller ID name.",
 	L"Updated ignored caller ID name's call count.",
+	L"Updated ignored phone number.",
 	L"Updated ignored phone number's call count."
 };

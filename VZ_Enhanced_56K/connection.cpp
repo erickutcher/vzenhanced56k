@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -33,11 +33,18 @@
 #define DEFAULT_PORT		80
 #define DEFAULT_PORT_SECURE	443
 
-#define CURRENT_VERSION		1005
-#define VERSION_URL			"https://sites.google.com/site/vzenhanced/version_56k.txt"
-
+#define CURRENT_VERSION		1006
+#ifdef _WIN64
+#define VERSION_URL			"https://sites.google.com/site/vzenhanced/version_56k_32.txt"
+#else
+#define VERSION_URL			"https://sites.google.com/site/vzenhanced/version_56k_64.txt"
+#endif
 CRITICAL_SECTION cut_cs;			// Queues additional update check threads.
 CRITICAL_SECTION cuc_cs;			// Blocks the CleanupConnection().
+
+unsigned char g_connection_retries		= 2;
+unsigned short g_connection_timeout		= 60;	// Seconds.
+unsigned char g_connection_ssl_version	= 4;	// TLS 1.2
 
 HANDLE update_check_semaphore = NULL;
 
@@ -166,13 +173,13 @@ SSL *Client_Connection_Secure( const char *server, unsigned short port, int time
 	}
 
 	DWORD protocol = 0;
-	switch ( cfg_connection_ssl_version )
+	switch ( g_connection_ssl_version )
 	{
 		case 4:	protocol |= SP_PROT_TLS1_2_CLIENT;
 		case 3:	protocol |= SP_PROT_TLS1_1_CLIENT;
 		case 2:	protocol |= SP_PROT_TLS1_CLIENT;
 		case 1:	protocol |= SP_PROT_SSL3_CLIENT;
-		case 0:	{ if ( cfg_connection_ssl_version < 4 ) { protocol |= SP_PROT_SSL2_CLIENT; } }
+		case 0:	{ if ( g_connection_ssl_version < 4 ) { protocol |= SP_PROT_SSL2_CLIENT; } }
 	}
 
 	SSL *ssl = SSL_new( protocol );
@@ -360,7 +367,7 @@ int GetHTTPResponse( CONNECTION *con, char **response_buffer, unsigned int &resp
 			{
 				end_of_header += 4;
 
-				header_offset = ( end_of_header - *response_buffer );
+				header_offset = ( unsigned int )( end_of_header - *response_buffer );
 
 				char *find_status = _StrChrA( *response_buffer, ' ' );
 				if ( find_status != NULL )
@@ -597,9 +604,9 @@ bool Try_Connect( CONNECTION *con, char *host, int timeout = 0, bool retry = tru
 {
 	int total_retries = 0;
 
-	if ( cfg_connection_reconnect && retry )
+	if ( retry )
 	{
-		total_retries = cfg_connection_retries;
+		total_retries = g_connection_retries;
 	}
 
 	char message_log[ 320 ];
@@ -678,9 +685,9 @@ int Try_Send_Receive( CONNECTION *con, char *host, char *resource /*for logging 
 	int total_retries = 0;
 	http_status = 0;
 
-	if ( cfg_connection_reconnect && retry )
+	if ( retry )
 	{
-		total_retries = cfg_connection_retries;
+		total_retries = g_connection_retries;
 	}
 
 	// We consider retry == 0 to be our normal connection.
@@ -802,12 +809,12 @@ void GetVersionInfo( char *version_url, unsigned long &version, char **download_
 		"Host: %s\r\n" \
 		"Connection: keep-alive\r\n\r\n", resource, host );
 
-		if ( !Try_Connect( &update_con, host, cfg_connection_timeout ) )
+		if ( !Try_Connect( &update_con, host, g_connection_timeout ) )
 		{
 			goto CLEANUP;
 		}
 
-		if ( Try_Send_Receive( &update_con, host, resource, version_send_buffer, send_buffer_length, &response, response_length, http_status, content_length, last_buffer_size, cfg_connection_timeout ) == -1 )
+		if ( Try_Send_Receive( &update_con, host, resource, version_send_buffer, send_buffer_length, &response, response_length, http_status, content_length, last_buffer_size, g_connection_timeout ) == -1 )
 		{
 			goto CLEANUP;
 		}
@@ -856,7 +863,7 @@ void GetVersionInfo( char *version_url, unsigned long &version, char **download_
 				{
 					*line_end = 0;
 
-					unsigned int download_url_length = ( line_end - line_start );
+					unsigned int download_url_length = ( unsigned int )( line_end - line_start );
 
 					*download_url = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * ( download_url_length + 1 ) );
 					_memcpy_s( *download_url, download_url_length + 1, line_start, download_url_length );
@@ -868,7 +875,7 @@ void GetVersionInfo( char *version_url, unsigned long &version, char **download_
 					// Find the notes block.
 					if ( content_length >= ( unsigned int )( line_start - ( file + 4 ) ) )
 					{
-						unsigned int notes_length = ( content_length - ( line_start - ( file + 4 ) ) );
+						unsigned int notes_length = ( unsigned int )( content_length - ( line_start - ( file + 4 ) ) );
 
 						*notes = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * ( notes_length + 1 ) );
 						_memcpy_s( *notes, notes_length + 1, line_start, notes_length );
@@ -878,7 +885,7 @@ void GetVersionInfo( char *version_url, unsigned long &version, char **download_
 				}
 				else if ( content_length >= ( unsigned int )( line_start - ( file + 4 ) ) )	// There's no notes section. Just get the download url.
 				{
-					unsigned int download_url_length = ( content_length - ( line_start - ( file + 4 ) ) );
+					unsigned int download_url_length = ( unsigned int )( content_length - ( line_start - ( file + 4 ) ) );
 
 					*download_url = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * ( download_url_length + 1 ) );
 					_memcpy_s( *download_url, download_url_length + 1, line_start, download_url_length );
@@ -966,12 +973,12 @@ bool DownloadUpdate( char *download_url )
 		"Host: %s\r\n" \
 		"Connection: keep-alive\r\n\r\n", resource, host );
 
-		if ( !Try_Connect( &update_con, host, cfg_connection_timeout ) )
+		if ( !Try_Connect( &update_con, host, g_connection_timeout ) )
 		{
 			goto CLEANUP;
 		}
 
-		if ( Try_Send_Receive( &update_con, host, resource, download_buffer, send_buffer_length, &response, response_length, http_status, content_length, last_buffer_size, cfg_connection_timeout ) == -1 )
+		if ( Try_Send_Receive( &update_con, host, resource, download_buffer, send_buffer_length, &response, response_length, http_status, content_length, last_buffer_size, g_connection_timeout ) == -1 )
 		{
 			goto CLEANUP;
 		}

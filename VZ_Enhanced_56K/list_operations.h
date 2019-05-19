@@ -1,6 +1,6 @@
 /*
 	VZ Enhanced 56K is a caller ID notifier that can block phone calls.
-	Copyright (C) 2013-2018 Eric Kutcher
+	Copyright (C) 2013-2019 Eric Kutcher
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -19,7 +19,9 @@
 #ifndef _LIST_OPERATIONS_H
 #define _LIST_OPERATIONS_H
 
-#define LOAD_CALL_LOG_HISTORY	4	// Does the same as IE_CALL_LOG_HISTORY
+#define LOAD_CALL_LOG_HISTORY	6	// Does the same as IE_CALL_LOG_HISTORY
+#define IE_ALLOW_CID_LIST		5
+#define IE_ALLOW_PN_LIST		4
 #define IE_CALL_LOG_HISTORY		3
 #define IE_CONTACT_LIST			2
 #define IE_IGNORE_CID_LIST		1
@@ -32,18 +34,34 @@ struct importexportinfo
 	unsigned char file_type;
 };
 
+struct copyinfo
+{
+	unsigned short column;
+	HWND hWnd;
+};
+
+struct removeinfo
+{
+	bool is_thread;
+	HWND hWnd;
+};
+
+void LoadLists();
+
 THREAD_RETURN export_list( void *pArguments );
 THREAD_RETURN import_list( void *pArguments );
 
 THREAD_RETURN remove_items( void *pArguments );
 
-THREAD_RETURN update_ignore_list( void *pArguments );
-THREAD_RETURN update_ignore_cid_list( void *pArguments );
+THREAD_RETURN update_allow_ignore_list( void *pArguments );
+THREAD_RETURN update_allow_ignore_cid_list( void *pArguments );
 THREAD_RETURN update_contact_list( void *pArguments );
 THREAD_RETURN update_call_log( void *pArguments );
 
 THREAD_RETURN create_call_log_csv_file( void *file_path );
 
 THREAD_RETURN copy_items( void *pArguments );
+
+THREAD_RETURN search_list( void *pArguments );
 
 #endif
