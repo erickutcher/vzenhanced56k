@@ -24,7 +24,7 @@
 
 bool RangeCompare( const wchar_t *range, const wchar_t *value )
 {
-	for ( ; *range == L'*' || *range == *value; range++, value++ )
+	for ( ; *range == L'*' || *range == *value; ++range, ++value )
 	{
 		if ( *range == L'\0' )
 		{

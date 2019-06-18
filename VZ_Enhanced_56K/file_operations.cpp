@@ -180,7 +180,7 @@ char read_config()
 		DWORD read = 0, pos = 0;
 		DWORD fz = GetFileSize( hFile_cfg, NULL );
 
-		int reserved = 1024 - 370;	// There are currently 370 bytes used for settings (not including the strings).
+		int reserved = 1024 - 380;	// There are currently 380 bytes used for settings (not including the strings).
 
 		// Our config file is going to be small. If it's something else, we're not going to read it.
 		// Add 5 for the strings.
@@ -458,8 +458,8 @@ char save_config()
 	HANDLE hFile_cfg = CreateFile( base_directory, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL );
 	if ( hFile_cfg != INVALID_HANDLE_VALUE )
 	{
-		int reserved = 1024 - 370; // There are currently 370 bytes used for settings (not including the strings).
-		int size = ( sizeof( int ) * 65 ) + ( sizeof( bool ) * 17 ) + ( sizeof( char ) * 75 ) + sizeof( unsigned short ) + sizeof( GUID ) + reserved;
+		int reserved = 1024 - 380; // There are currently 380 bytes used for settings (not including the strings).
+		int size = ( sizeof( int ) * 67 ) + ( sizeof( bool ) * 17 ) + ( sizeof( char ) * 77 ) + sizeof( unsigned short ) + sizeof( GUID ) + reserved;
 		int pos = 0;
 
 		char *write_buf = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * size );
@@ -909,7 +909,7 @@ char read_allow_ignore_list( wchar_t *file_path, dllrbt_tree *list, unsigned cha
 
 				// Make sure that we have at least part of the entry. This is the minimum size an entry could be.
 				// Include last called, call total, and phone number NULL terminator.
-				if ( read < ( sizeof( ULONGLONG ) + sizeof( unsigned int ) + sizeof( char ) ) )
+				if ( read < ( sizeof( ULONGLONG ) + sizeof( unsigned int ) + sizeof( wchar_t ) ) )
 				{
 					break;
 				}
@@ -947,12 +947,12 @@ char read_allow_ignore_list( wchar_t *file_path, dllrbt_tree *list, unsigned cha
 					// Phone Number
 					int phone_number_length = lstrlenW( ( wchar_t * )p ) + 1;
 
+					offset += ( phone_number_length * sizeof( wchar_t ) );
+					if ( offset > read ) { goto CLEANUP; }
+
 					// Let's not allocate an empty string.
 					if ( phone_number_length > 1 )
 					{
-						offset += ( phone_number_length * sizeof( wchar_t ) );
-						if ( offset > read ) { goto CLEANUP; }
-
 						phone_number = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * phone_number_length );
 						_memcpy_s( phone_number, sizeof( wchar_t ) * phone_number_length, p, sizeof( wchar_t ) * phone_number_length );
 						*( phone_number + ( phone_number_length - 1 ) ) = 0;	// Sanity
@@ -1260,7 +1260,7 @@ char read_allow_ignore_cid_list( wchar_t *file_path, dllrbt_tree *list, unsigned
 
 				// Make sure that we have at least part of the entry. This is the minimum size an entry could be.
 				// Include last called, call total, match flag, and search string NULL terminator.
-				if ( read < ( sizeof( ULONGLONG ) + sizeof( unsigned int ) + sizeof( unsigned char ) + sizeof( char ) ) )
+				if ( read < ( sizeof( ULONGLONG ) + sizeof( unsigned int ) + sizeof( unsigned char ) + sizeof( wchar_t ) ) )
 				{
 					break;
 				}
@@ -1559,8 +1559,8 @@ char read_call_log_history( wchar_t *file_path )
 
 				buf[ read ] = 0;	// Guarantee a NULL terminated buffer.
 
-				// Make sure that we have at least part of the entry. 2 = 2 NULL strings. This is the minimum size an entry could be.
-				if ( read < ( sizeof( bool ) + sizeof( ULONGLONG ) + 2 ) )
+				// Make sure that we have at least part of the entry. 2/3 = NULL strings. This is the minimum size an entry could be.
+				if ( read < ( sizeof( bool ) + sizeof( ULONGLONG ) + ( version == 0 ? 2 : 3 ) ) )
 				{
 					break;
 				}
