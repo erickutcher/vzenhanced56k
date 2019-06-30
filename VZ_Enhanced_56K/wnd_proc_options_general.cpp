@@ -27,6 +27,9 @@
 #define BTN_ENABLE_MESSAGE_LOG	1006
 #define BTN_CHECK_FOR_UPDATES	1007
 
+#define BTN_ADD_TO_ALLOW		1008
+#define BTN_ADD_TO_IGNORE		1009
+
 HWND g_hWnd_chk_tray_icon = NULL;
 HWND g_hWnd_chk_minimize = NULL;
 HWND g_hWnd_chk_close = NULL;
@@ -35,6 +38,9 @@ HWND g_hWnd_chk_always_on_top = NULL;
 HWND g_hWnd_chk_enable_history = NULL;
 HWND g_hWnd_chk_message_log = NULL;
 HWND g_hWnd_chk_check_for_updates = NULL;
+
+HWND g_hWnd_chk_add_to_allow = NULL;
+HWND g_hWnd_chk_add_to_ignore = NULL;
 
 LRESULT CALLBACK GeneralTabWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 {
@@ -55,6 +61,12 @@ LRESULT CALLBACK GeneralTabWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 
 			g_hWnd_chk_check_for_updates = _CreateWindowW( WC_BUTTON, ST_Check_for_updates_upon_startup, BS_AUTOCHECKBOX | WS_CHILD | WS_TABSTOP | WS_VISIBLE, 0, 140, 200, 20, hWnd, ( HMENU )BTN_CHECK_FOR_UPDATES, NULL, NULL );
 
+			HWND hWnd_static_when_allowed = _CreateWindowW( WC_STATIC, ST_When_call_is_allowed_by_its_CID_Name_, WS_CHILD | WS_VISIBLE, 0, 165, 300, 15, hWnd, NULL, NULL, NULL );
+			g_hWnd_chk_add_to_allow = _CreateWindowW( WC_BUTTON, ST_Add_phone_number_to_Allow_PN_list, BS_AUTOCHECKBOX | WS_CHILD | WS_TABSTOP | WS_VISIBLE, 0, 180, 350, 20, hWnd, ( HMENU )BTN_ADD_TO_ALLOW, NULL, NULL );
+
+			HWND hWnd_static_when_ignored = _CreateWindowW( WC_STATIC, ST_When_call_is_ignored_by_its_CID_Name_, WS_CHILD | WS_VISIBLE, 0, 205, 300, 15, hWnd, NULL, NULL, NULL );
+			g_hWnd_chk_add_to_ignore = _CreateWindowW( WC_BUTTON, ST_Add_phone_number_to_Ignore_PN_list, BS_AUTOCHECKBOX | WS_CHILD | WS_TABSTOP | WS_VISIBLE, 0, 220, 350, 20, hWnd, ( HMENU )BTN_ADD_TO_IGNORE, NULL, NULL );
+
 			_SendMessageW( g_hWnd_chk_tray_icon, WM_SETFONT, ( WPARAM )hFont, 0 );
 			_SendMessageW( g_hWnd_chk_minimize, WM_SETFONT, ( WPARAM )hFont, 0 );
 			_SendMessageW( g_hWnd_chk_close, WM_SETFONT, ( WPARAM )hFont, 0 );
@@ -67,6 +79,12 @@ LRESULT CALLBACK GeneralTabWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 			_SendMessageW( g_hWnd_chk_message_log, WM_SETFONT, ( WPARAM )hFont, 0 );
 
 			_SendMessageW( g_hWnd_chk_check_for_updates, WM_SETFONT, ( WPARAM )hFont, 0 );
+
+			_SendMessageW( hWnd_static_when_allowed, WM_SETFONT, ( WPARAM )hFont, 0 );
+			_SendMessageW( g_hWnd_chk_add_to_allow, WM_SETFONT, ( WPARAM )hFont, 0 );
+
+			_SendMessageW( hWnd_static_when_ignored, WM_SETFONT, ( WPARAM )hFont, 0 );
+			_SendMessageW( g_hWnd_chk_add_to_ignore, WM_SETFONT, ( WPARAM )hFont, 0 );
 
 			return 0;
 		}
@@ -108,6 +126,9 @@ LRESULT CALLBACK GeneralTabWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 				case BTN_ALWAYS_ON_TOP:
 				case BTN_ENABLE_HISTORY:
 				case BTN_ENABLE_MESSAGE_LOG:
+				case BTN_CHECK_FOR_UPDATES:
+				case BTN_ADD_TO_ALLOW:
+				case BTN_ADD_TO_IGNORE:
 				{
 					options_state_changed = true;
 					_EnableWindow( g_hWnd_apply, TRUE );

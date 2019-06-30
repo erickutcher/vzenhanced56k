@@ -45,6 +45,9 @@ extern HWND g_hWnd_chk_enable_history;
 extern HWND g_hWnd_chk_message_log;
 extern HWND g_hWnd_chk_check_for_updates;
 
+extern HWND g_hWnd_chk_add_to_allow;
+extern HWND g_hWnd_chk_add_to_ignore;
+
 
 // Modem Tab
 extern HWND g_hWnd_default_modem;

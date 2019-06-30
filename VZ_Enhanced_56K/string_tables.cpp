@@ -264,6 +264,8 @@ wchar_t *options_string_table[] =
 	L"...",
 	L"12 hour",
 	L"24 hour",
+	L"Add its phone number to the allow phone number list",
+	L"Add its phone number to the ignore phone number list",
 	L"Always on top",
 	L"Apply",
 	L"Background color:",
@@ -312,6 +314,8 @@ wchar_t *options_string_table[] =
 	L"Top Right",
 	L"Transparency:",
 	L"Vertical",
+	L"When a call is allowed by its caller ID name:",
+	L"When a call is ignored by its caller ID name:",
 	L"Width (pixels):"
 };
 

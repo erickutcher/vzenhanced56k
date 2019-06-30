@@ -457,6 +457,9 @@ extern bool cfg_enable_message_log;
 
 extern bool cfg_check_for_updates;
 
+extern bool cfg_auto_add_allow_number;
+extern bool cfg_auto_add_ignore_number;
+
 extern bool cfg_enable_popups;
 extern bool cfg_popup_hide_border;
 extern int cfg_popup_width;

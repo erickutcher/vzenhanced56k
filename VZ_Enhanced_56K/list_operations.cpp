@@ -877,7 +877,7 @@ THREAD_RETURN remove_items( void *pArguments )
 					RangeRemove( &allow_range_list[ range_index ], aii->phone_number );
 
 					// Update each display_info item to indicate that it is no longer allowed.
-					update_phone_number_matches( aii->phone_number, 0, true, &allow_range_list[ range_index ], false );
+					update_phone_number_matches( aii->phone_number, LIST_TYPE_ALLOW, true, &allow_range_list[ range_index ], false );
 				}
 				else
 				{
@@ -885,7 +885,7 @@ THREAD_RETURN remove_items( void *pArguments )
 					if ( !RangeSearch( &allow_range_list[ range_index ], aii->phone_number, range_number ) )
 					{
 						// Update each display_info item to indicate that it is no longer allowed.
-						update_phone_number_matches( aii->phone_number, 0, false, NULL, false );
+						update_phone_number_matches( aii->phone_number, LIST_TYPE_ALLOW, false, NULL, false );
 					}
 				}
 
@@ -917,7 +917,7 @@ THREAD_RETURN remove_items( void *pArguments )
 					RangeRemove( &ignore_range_list[ range_index ], aii->phone_number );
 
 					// Update each display_info item to indicate that it is no longer ignored.
-					update_phone_number_matches( aii->phone_number, 1, true, &ignore_range_list[ range_index ], false );
+					update_phone_number_matches( aii->phone_number, LIST_TYPE_IGNORE, true, &ignore_range_list[ range_index ], false );
 				}
 				else
 				{
@@ -925,7 +925,7 @@ THREAD_RETURN remove_items( void *pArguments )
 					if ( !RangeSearch( &ignore_range_list[ range_index ], aii->phone_number, range_number ) )
 					{
 						// Update each display_info item to indicate that it is no longer ignored.
-						update_phone_number_matches( aii->phone_number, 1, false, NULL, false );
+						update_phone_number_matches( aii->phone_number, LIST_TYPE_IGNORE, false, NULL, false );
 					}
 				}
 
@@ -1174,14 +1174,14 @@ THREAD_RETURN update_allow_ignore_list( void *pArguments )
 									RangeRemove( &allow_range_list[ range_index ], old_aii->phone_number );
 
 									// Update each display_info item to indicate that it is no longer allowed.
-									update_phone_number_matches( old_aii->phone_number, 0, true, &allow_range_list[ range_index ], false );
+									update_phone_number_matches( old_aii->phone_number, LIST_TYPE_ALLOW, true, &allow_range_list[ range_index ], false );
 								}
 								else
 								{
 									RangeRemove( &ignore_range_list[ range_index ], old_aii->phone_number );
 
 									// Update each display_info item to indicate that it is no longer ignored.
-									update_phone_number_matches( old_aii->phone_number, 1, true, &ignore_range_list[ range_index ], false );
+									update_phone_number_matches( old_aii->phone_number, LIST_TYPE_IGNORE, true, &ignore_range_list[ range_index ], false );
 								}
 							}
 							else
@@ -1268,7 +1268,7 @@ THREAD_RETURN update_allow_ignore_list( void *pArguments )
 
 					if ( aiui->last_called.QuadPart > 0 )
 					{
-						aiui->aii->last_called = aiui->last_called;
+						aiui->aii->last_called.QuadPart = aiui->last_called.QuadPart;
 
 						GlobalFree( aiui->aii->w_last_called );
 
@@ -1825,7 +1825,7 @@ THREAD_RETURN update_allow_ignore_cid_list( void *pArguments )
 
 					if ( aicidui->last_called.QuadPart > 0 )
 					{
-						aicidui->aicidi->last_called = aicidui->last_called;
+						aicidui->aicidi->last_called.QuadPart = aicidui->last_called.QuadPart;
 
 						GlobalFree( aicidui->aicidi->w_last_called );
 
@@ -2415,6 +2415,28 @@ THREAD_RETURN update_call_log( void *pArguments )
 				{
 					GlobalFree( aicidui );
 				}
+
+				if ( cfg_auto_add_allow_number )
+				{
+					allow_ignore_update_info *aiui = ( allow_ignore_update_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_update_info ) );
+					aiui->action = 0;	// Add = 0, 1 = Remove, 2 = Add all tree items, 3 = Update
+					aiui->list_type = LIST_TYPE_ALLOW;
+					aiui->hWnd = g_hWnd_allow_list;
+
+					aiui->phone_number = GlobalStrDupW( di->phone_number );
+
+					// Add items. aiui is freed in the update_allow_ignore_list thread.
+					HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_list, ( void * )aiui, 0, NULL );
+					if ( thread != NULL )
+					{
+						CloseHandle( thread );
+					}
+					else
+					{
+						GlobalFree( aiui->phone_number );
+						GlobalFree( aiui );
+					}
+				}
 			}
 			break;
 
@@ -2461,6 +2483,28 @@ THREAD_RETURN update_call_log( void *pArguments )
 				else
 				{
 					GlobalFree( aicidui );
+				}
+
+				if ( cfg_auto_add_ignore_number )
+				{
+					allow_ignore_update_info *aiui = ( allow_ignore_update_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_update_info ) );
+					aiui->action = 0;	// Add = 0, 1 = Remove, 2 = Add all tree items, 3 = Update
+					aiui->list_type = LIST_TYPE_IGNORE;
+					aiui->hWnd = g_hWnd_ignore_list;
+
+					aiui->phone_number = GlobalStrDupW( di->phone_number );
+
+					// Add items. aiui is freed in the update_allow_ignore_list thread.
+					HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_list, ( void * )aiui, 0, NULL );
+					if ( thread != NULL )
+					{
+						CloseHandle( thread );
+					}
+					else
+					{
+						GlobalFree( aiui->phone_number );
+						GlobalFree( aiui );
+					}
 				}
 			}
 			break;
@@ -2799,7 +2843,6 @@ THREAD_RETURN copy_items( void *pArguments )
 			_wmemcpy_s( copy_buffer + buffer_offset, buffer_size - buffer_offset, copy_string, value_length );
 			buffer_offset += value_length;
 
-			copy_string = NULL;
 			add_newline = true;
 		}
 

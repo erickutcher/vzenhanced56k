@@ -153,7 +153,7 @@ void reset_settings()
 		}
 
 		_memcpy_s( &ps->popup_info, sizeof( POPUP_INFO ), g_popup_info[ i ], sizeof( POPUP_INFO ) );
-		
+
 		ps->popup_info.font_face = GlobalStrDupW( g_popup_info[ i ]->font_face );
 
 		if ( g_popup_info[ i ]->font_face != NULL )
@@ -308,6 +308,9 @@ void Set_Window_Settings()
 	_SendMessageW( g_hWnd_chk_message_log, BM_SETCHECK, ( cfg_enable_message_log ? BST_CHECKED : BST_UNCHECKED ), 0 );
 
 	_SendMessageW( g_hWnd_chk_check_for_updates, BM_SETCHECK, ( cfg_check_for_updates ? BST_CHECKED : BST_UNCHECKED ), 0 );
+
+	_SendMessageW( g_hWnd_chk_add_to_allow, BM_SETCHECK, ( cfg_auto_add_allow_number ? BST_CHECKED : BST_UNCHECKED ), 0 );
+	_SendMessageW( g_hWnd_chk_add_to_ignore, BM_SETCHECK, ( cfg_auto_add_ignore_number ? BST_CHECKED : BST_UNCHECKED ), 0 );
 
 	if ( cfg_tray_icon )
 	{
@@ -864,6 +867,10 @@ LRESULT CALLBACK OptionsWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
 						default_recording = rti;
 
 						cfg_check_for_updates = ( _SendMessageW( g_hWnd_chk_check_for_updates, BM_GETCHECK, 0, 0 ) == BST_CHECKED ? true : false );
+
+						cfg_auto_add_allow_number = ( _SendMessageW( g_hWnd_chk_add_to_allow, BM_GETCHECK, 0, 0 ) == BST_CHECKED ? true : false );
+						cfg_auto_add_ignore_number = ( _SendMessageW( g_hWnd_chk_add_to_ignore, BM_GETCHECK, 0, 0 ) == BST_CHECKED ? true : false );
+
 						cfg_popup_position = ( unsigned char )_SendMessageW( g_hWnd_position, CB_GETCURSEL, 0, 0 );
 						
 						cfg_minimize_to_tray = ( _SendMessageW( g_hWnd_chk_minimize, BM_GETCHECK, 0, 0 ) == BST_CHECKED ? true : false );

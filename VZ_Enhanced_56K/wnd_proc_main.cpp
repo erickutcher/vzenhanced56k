@@ -1334,13 +1334,15 @@ void HandleCommand( HWND hWnd, WPARAM wParam, LPARAM lParam )
 				_SendMessageW( g_hWnd_call_log, LVM_GETITEM, 0, ( LPARAM )&lvi );
 
 				display_info *di = ( display_info * )lvi.lParam;
+				if ( di != NULL )
+				{
+					di->process_incoming = false;
+					di->ignored = true;
 
-				di->process_incoming = false;
-				di->ignored = true;
+					_InvalidateRect( g_hWnd_call_log, NULL, TRUE );
 
-				_InvalidateRect( g_hWnd_call_log, NULL, TRUE );
-
-				IgnoreIncomingCall( di->incoming_call );
+					IgnoreIncomingCall( di->incoming_call );
+				}
 			}
 		}
 		break;
@@ -1833,7 +1835,7 @@ void HandleCommand( HWND hWnd, WPARAM wParam, LPARAM lParam )
 		{
 			wchar_t msg[ 512 ];
 			__snwprintf( msg, 512, L"VZ Enhanced 56K is made free under the GPLv3 license.\r\n\r\n" \
-								   L"Version 1.0.0.7 (%u-bit)\r\n\r\n" \
+								   L"Version 1.0.0.8 (%u-bit)\r\n\r\n" \
 								   L"Built on %s, %s %d, %04d %d:%02d:%02d %s (UTC)\r\n\r\n" \
 								   L"Copyright \xA9 2013-2019 Eric Kutcher",
 #ifdef _WIN64

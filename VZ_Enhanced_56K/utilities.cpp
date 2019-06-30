@@ -59,6 +59,9 @@ bool cfg_enable_message_log = false;
 
 bool cfg_check_for_updates = false;
 
+bool cfg_auto_add_allow_number = false;
+bool cfg_auto_add_ignore_number = false;
+
 bool cfg_enable_popups = false;
 bool cfg_popup_hide_border = false;
 bool cfg_popup_show_contact_picture = false;
@@ -398,7 +401,7 @@ char is_num_w( const wchar_t *str )
 
 	if ( *s != NULL && *s == L'+' )
 	{
-		*s++;
+		++s;
 	}
 
 	while ( *s != NULL )
@@ -412,7 +415,7 @@ char is_num_w( const wchar_t *str )
 			return -1;
 		}
 
-		*s++;
+		++s;
 	}
 
 	return ret;

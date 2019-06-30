@@ -180,7 +180,7 @@ char read_config()
 		DWORD read = 0, pos = 0;
 		DWORD fz = GetFileSize( hFile_cfg, NULL );
 
-		int reserved = 1024 - 380;	// There are currently 380 bytes used for settings (not including the strings).
+		int reserved = 1024 - 382;	// There are currently 382 bytes used for settings (not including the strings).
 
 		// Our config file is going to be small. If it's something else, we're not going to read it.
 		// Add 5 for the strings.
@@ -358,6 +358,11 @@ char read_config()
 					next += sizeof( char );
 				}
 
+				_memcpy_s( &cfg_auto_add_allow_number, sizeof( bool ), next, sizeof( bool ) );
+				next += sizeof( bool );
+				_memcpy_s( &cfg_auto_add_ignore_number, sizeof( bool ), next, sizeof( bool ) );
+				next += sizeof( bool );
+
 				//
 
 				next += reserved;	// Skip past reserved bytes.
@@ -458,8 +463,8 @@ char save_config()
 	HANDLE hFile_cfg = CreateFile( base_directory, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL );
 	if ( hFile_cfg != INVALID_HANDLE_VALUE )
 	{
-		int reserved = 1024 - 380; // There are currently 380 bytes used for settings (not including the strings).
-		int size = ( sizeof( int ) * 67 ) + ( sizeof( bool ) * 17 ) + ( sizeof( char ) * 77 ) + sizeof( unsigned short ) + sizeof( GUID ) + reserved;
+		int reserved = 1024 - 382; // There are currently 382 bytes used for settings (not including the strings).
+		int size = ( sizeof( int ) * 67 ) + ( sizeof( bool ) * 19 ) + ( sizeof( char ) * 77 ) + sizeof( unsigned short ) + sizeof( GUID ) + reserved;
 		int pos = 0;
 
 		char *write_buf = ( char * )GlobalAlloc( GMEM_FIXED, sizeof( char ) * size );
@@ -627,6 +632,11 @@ char save_config()
 			_memcpy_s( write_buf + pos, size - pos, &g_popup_info[ i ]->line_order, sizeof( char ) );
 			pos += sizeof( char );
 		}
+
+		_memcpy_s( write_buf + pos, size - pos, &cfg_auto_add_allow_number, sizeof( bool ) );
+		pos += sizeof( bool );
+		_memcpy_s( write_buf + pos, size - pos, &cfg_auto_add_ignore_number, sizeof( bool ) );
+		pos += sizeof( bool );
 
 		//
 
@@ -1415,7 +1425,7 @@ char save_allow_ignore_list( wchar_t *file_path, dllrbt_tree *list, unsigned cha
 				_memcpy_s( buf + pos, size - pos, &aii->count, sizeof( unsigned int ) );
 				pos += sizeof( unsigned int );
 
-				_memcpy_s( buf + pos, size - pos, &aii->last_called, sizeof( ULONGLONG ) );
+				_memcpy_s( buf + pos, size - pos, &aii->last_called.QuadPart, sizeof( ULONGLONG ) );
 				pos += sizeof( ULONGLONG );
 
 				_memcpy_s( buf + pos, size - pos, aii->phone_number, phone_number_length );
@@ -1483,7 +1493,7 @@ char save_allow_ignore_cid_list( wchar_t *file_path, dllrbt_tree *list, unsigned
 				_memcpy_s( buf + pos, size - pos, &aicidi->count, sizeof( unsigned int ) );
 				pos += sizeof( unsigned int );
 
-				_memcpy_s( buf + pos, size - pos, &aicidi->last_called, sizeof( ULONGLONG ) );
+				_memcpy_s( buf + pos, size - pos, &aicidi->last_called.QuadPart, sizeof( ULONGLONG ) );
 				pos += sizeof( ULONGLONG );
 
 				_memcpy_s( buf + pos, size - pos, aicidi->caller_id, caller_id_length );
@@ -1825,33 +1835,36 @@ char save_call_log_history( wchar_t *file_path )
 
 			display_info *di = ( display_info * )lvi.lParam;
 
-			// lstrlen is safe for NULL values.
-			int caller_id_length = ( lstrlenW( di->caller_id ) + 1 ) * sizeof( wchar_t );
-			int custom_caller_id_length = ( lstrlenW( di->custom_caller_id ) + 1 ) * sizeof( wchar_t );
-			int phone_number_length = ( lstrlenW( di->phone_number ) + 1 ) * sizeof( wchar_t );
-
-			// See if the next entry can fit in the buffer. If it can't, then we dump the buffer.
-			if ( ( signed )( pos + phone_number_length + caller_id_length + custom_caller_id_length + sizeof( ULONGLONG ) + sizeof( bool ) ) > size )
+			if ( di != NULL )
 			{
-				// Dump the buffer.
-				WriteFile( hFile_call_log, write_buf, pos, &write, NULL );
-				pos = 0;
+				// lstrlen is safe for NULL values.
+				int caller_id_length = ( lstrlenW( di->caller_id ) + 1 ) * sizeof( wchar_t );
+				int custom_caller_id_length = ( lstrlenW( di->custom_caller_id ) + 1 ) * sizeof( wchar_t );
+				int phone_number_length = ( lstrlenW( di->phone_number ) + 1 ) * sizeof( wchar_t );
+
+				// See if the next entry can fit in the buffer. If it can't, then we dump the buffer.
+				if ( ( signed )( pos + phone_number_length + caller_id_length + custom_caller_id_length + sizeof( ULONGLONG ) + sizeof( bool ) ) > size )
+				{
+					// Dump the buffer.
+					WriteFile( hFile_call_log, write_buf, pos, &write, NULL );
+					pos = 0;
+				}
+
+				_memcpy_s( write_buf + pos, size - pos, &di->ignored, sizeof( bool ) );
+				pos += sizeof( bool );
+
+				_memcpy_s( write_buf + pos, size - pos, &di->time.QuadPart, sizeof( ULONGLONG ) );
+				pos += sizeof( ULONGLONG );
+
+				_memcpy_s( write_buf + pos, size - pos, di->caller_id, caller_id_length );
+				pos += caller_id_length;
+
+				_memcpy_s( write_buf + pos, size - pos, SAFESTRW( di->custom_caller_id ), custom_caller_id_length );
+				pos += custom_caller_id_length;
+
+				_memcpy_s( write_buf + pos, size - pos, di->phone_number, phone_number_length );
+				pos += phone_number_length;
 			}
-
-			_memcpy_s( write_buf + pos, size - pos, &di->ignored, sizeof( bool ) );
-			pos += sizeof( bool );
-
-			_memcpy_s( write_buf + pos, size - pos, &di->time.QuadPart, sizeof( ULONGLONG ) );
-			pos += sizeof( ULONGLONG );
-
-			_memcpy_s( write_buf + pos, size - pos, di->caller_id, caller_id_length );
-			pos += caller_id_length;
-
-			_memcpy_s( write_buf + pos, size - pos, SAFESTRW( di->custom_caller_id ), custom_caller_id_length );
-			pos += custom_caller_id_length;
-
-			_memcpy_s( write_buf + pos, size - pos, di->phone_number, phone_number_length );
-			pos += phone_number_length;
 		}
 
 		// If there's anything remaining in the buffer, then write it to the file.
