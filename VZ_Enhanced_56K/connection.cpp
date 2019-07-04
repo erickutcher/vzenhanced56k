@@ -33,7 +33,7 @@
 #define DEFAULT_PORT		80
 #define DEFAULT_PORT_SECURE	443
 
-#define CURRENT_VERSION		1007
+#define CURRENT_VERSION		1009
 #ifdef _WIN64
 #define VERSION_URL			"https://sites.google.com/site/vzenhanced/version_56k_32.txt"
 #else

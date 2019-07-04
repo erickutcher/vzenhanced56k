@@ -963,51 +963,27 @@ wchar_t *GetSelectedColumnPhoneNumber( HWND hWnd, unsigned int column_id )
 		LVITEM lvi;
 		_memzero( &lvi, sizeof( LVITEM ) );
 		lvi.mask = LVIF_PARAM;
+		lvi.iItem = ( int )_SendMessageW( hWnd, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
 
-		if ( column_id == MENU_PHONE_NUMBER_COL17 )
+		if ( lvi.iItem != -1 )
 		{
-			lvi.iItem = ( int )_SendMessageW( hWnd, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
+			_SendMessageW( hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi );
 
-			if ( lvi.iItem != -1 )
+			if ( lvi.lParam != NULL )
 			{
-				_SendMessageW( hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi );
-
-				phone_number = ( ( display_info * )lvi.lParam )->phone_number;
-			}
-		}
-		else if ( column_id == MENU_PHONE_NUMBER_COL21 ||
-				  column_id == MENU_PHONE_NUMBER_COL25 ||
-				  column_id == MENU_PHONE_NUMBER_COL27 ||
-				  column_id == MENU_PHONE_NUMBER_COL211 ||
-				  column_id == MENU_PHONE_NUMBER_COL212 || 
-				  column_id == MENU_PHONE_NUMBER_COL216 )
-		{
-			lvi.iItem = ( int )_SendMessageW( hWnd, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
-
-			if ( lvi.iItem != -1 )
-			{
-				_SendMessageW( hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi );
-
 				switch ( column_id )
 				{
+					case MENU_PHONE_NUMBER_COL17: { phone_number = ( ( display_info * )lvi.lParam )->phone_number; } break;
+
 					case MENU_PHONE_NUMBER_COL21: { phone_number = ( ( contact_info * )lvi.lParam )->cell_phone_number; } break;
 					case MENU_PHONE_NUMBER_COL25: { phone_number = ( ( contact_info * )lvi.lParam )->fax_number; } break;
 					case MENU_PHONE_NUMBER_COL27: { phone_number = ( ( contact_info * )lvi.lParam )->home_phone_number; } break;
 					case MENU_PHONE_NUMBER_COL211: { phone_number = ( ( contact_info * )lvi.lParam )->office_phone_number; } break;
 					case MENU_PHONE_NUMBER_COL212: { phone_number = ( ( contact_info * )lvi.lParam )->other_phone_number; } break;
 					case MENU_PHONE_NUMBER_COL216: { phone_number = ( ( contact_info * )lvi.lParam )->work_phone_number; } break;
+
+					case MENU_PHONE_NUMBER_COL32: { phone_number = ( ( allow_ignore_info * )lvi.lParam )->phone_number; } break;
 				}
-			}
-		}
-		else if ( column_id == MENU_PHONE_NUMBER_COL32 )
-		{
-			lvi.iItem = ( int )_SendMessageW( hWnd, LVM_GETNEXTITEM, -1, LVNI_FOCUSED | LVNI_SELECTED );
-
-			if ( lvi.iItem != -1 )
-			{
-				_SendMessageW( hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi );
-
-				phone_number = ( ( allow_ignore_info * )lvi.lParam )->phone_number;
 			}
 		}
 	}

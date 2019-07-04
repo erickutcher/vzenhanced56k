@@ -254,7 +254,7 @@ void HandleRingtone( unsigned char state, wchar_t *file_path, wchar_t *alias )
 	if ( state == RINGTONE_PLAY )
 	{
 		rti->file_path = ( wchar_t * )GlobalAlloc( GMEM_FIXED, sizeof( wchar_t ) * short_path_length );
-		_wmemcpy_s( rti->file_path, sizeof( wchar_t ) * short_path_length, short_path, short_path_length );
+		_wmemcpy_s( rti->file_path, short_path_length, short_path, short_path_length );
 		rti->file_path[ short_path_length - 1 ] = 0;	// Sanity.
 	}
 	else

@@ -1435,14 +1435,15 @@ void HandleCommand( HWND hWnd, WPARAM wParam, LPARAM lParam )
 			{
 				_SendMessageW( g_hWnd_call_log, LVM_GETITEM, 0, ( LPARAM )&lvi );
 
-				if ( lvi.lParam != NULL )
+				display_info *di = ( display_info * )lvi.lParam;
+
+				if ( di != NULL )
 				{
 					bool has_match;
 
 					if ( LOWORD( wParam ) == MENU_ALLOW_LIST || LOWORD( wParam ) == MENU_IGNORE_LIST )
 					{
-						has_match = ( LOWORD( wParam ) == MENU_ALLOW_LIST ? ( ( display_info * )lvi.lParam )->allow_phone_number :
-																			( ( display_info * )lvi.lParam )->ignore_phone_number );
+						has_match = ( LOWORD( wParam ) == MENU_ALLOW_LIST ? di->allow_phone_number : di->ignore_phone_number );
 
 						if ( has_match )
 						{
@@ -1488,11 +1489,11 @@ void HandleCommand( HWND hWnd, WPARAM wParam, LPARAM lParam )
 					{
 						if ( LOWORD( wParam ) == MENU_ALLOW_CID_LIST )
 						{
-							has_match = ( ( ( display_info * )lvi.lParam )->allow_cid_match_count > 0 ? true : false );
+							has_match = ( di->allow_cid_match_count > 0 ? true : false );
 						}
 						else
 						{
-							has_match = ( ( ( display_info * )lvi.lParam )->ignore_cid_match_count > 0 ? true : false );
+							has_match = ( di->ignore_cid_match_count > 0 ? true : false );
 						}
 
 						if ( has_match )
@@ -1534,7 +1535,7 @@ void HandleCommand( HWND hWnd, WPARAM wParam, LPARAM lParam )
 								g_hWnd_ignore_cid = _CreateWindowExW( ( cfg_always_on_top ? WS_EX_TOPMOST : 0 ), L"cid", ST_Ignore_Caller_ID_Name, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, ( ( _GetSystemMetrics( SM_CXSCREEN ) - 205 ) / 2 ), ( ( _GetSystemMetrics( SM_CYSCREEN ) - 193 ) / 2 ), 205, 193, NULL, NULL, NULL, ( LPVOID )0 );
 							}
 
-							_SendMessageW( g_hWnd_ignore_cid, WM_PROPAGATE, 0x01 | ( LOWORD( wParam ) == MENU_ALLOW_CID_LIST ? 0x04 : 0x00 ) | ( _SendMessageW( g_hWnd_call_log, LVM_GETSELECTEDCOUNT, 0, 0 ) > 1 ? 0x08 : 0x00 ), lvi.lParam );
+							_SendMessageW( g_hWnd_ignore_cid, WM_PROPAGATE, 0x01 | ( LOWORD( wParam ) == MENU_ALLOW_CID_LIST ? 0x04 : 0x00 ) | ( _SendMessageW( g_hWnd_call_log, LVM_GETSELECTEDCOUNT, 0, 0 ) > 1 ? 0x08 : 0x00 ), ( LPARAM )di );
 
 							_SetForegroundWindow( g_hWnd_ignore_cid );
 						}
@@ -1835,7 +1836,7 @@ void HandleCommand( HWND hWnd, WPARAM wParam, LPARAM lParam )
 		{
 			wchar_t msg[ 512 ];
 			__snwprintf( msg, 512, L"VZ Enhanced 56K is made free under the GPLv3 license.\r\n\r\n" \
-								   L"Version 1.0.0.8 (%u-bit)\r\n\r\n" \
+								   L"Version 1.0.0.9 (%u-bit)\r\n\r\n" \
 								   L"Built on %s, %s %d, %04d %d:%02d:%02d %s (UTC)\r\n\r\n" \
 								   L"Copyright \xA9 2013-2019 Eric Kutcher",
 #ifdef _WIN64
@@ -2852,6 +2853,8 @@ LRESULT CALLBACK MainWndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam 
 		case WM_ACTIVATE:
 		{
 			_SetFocus( GetCurrentListView() );	// Allows us to scroll the listview.
+
+			return 0;
 		}
 		break;
 

@@ -206,14 +206,14 @@ void HandleIncomingCallerID( HCALL call, LINECALLINFO *lci )
 			{
 				di->phone_number = ( wchar_t * )GlobalAlloc( GMEM_FIXED, lci->dwCallerIDSize );
 				_memcpy_s( di->phone_number, lci->dwCallerIDSize, ( char * )lci + lci->dwCallerIDOffset, lci->dwCallerIDSize );
-				di->phone_number[ lci->dwCallerIDSize - 1 ] = 0;	// Sanity.
+				di->phone_number[ ( lci->dwCallerIDSize / sizeof( wchar_t ) ) - 1 ] = 0;	// Sanity.
 			}
 
 			if ( ( lci->dwCallerIDFlags & LINECALLPARTYID_NAME ) && lci->dwCallerIDNameSize > 1 )	// Ignore the empty string if that's all we get.
 			{
 				di->caller_id = ( wchar_t * )GlobalAlloc( GMEM_FIXED, lci->dwCallerIDNameSize );
 				_memcpy_s( di->caller_id, lci->dwCallerIDNameSize, ( char * )lci + lci->dwCallerIDNameOffset, lci->dwCallerIDNameSize );
-				di->caller_id[ lci->dwCallerIDNameSize - 1 ] = 0;	// Sanity.
+				di->caller_id[ ( lci->dwCallerIDNameSize / sizeof( wchar_t ) ) - 1 ] = 0;	// Sanity.
 
 				if ( di->phone_number == NULL )
 				{

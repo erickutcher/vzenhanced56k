@@ -45,16 +45,16 @@ void update_phone_number_matches( wchar_t *phone_number, unsigned char list_type
 			DoublyLinkedList *di_node = dll;
 			while ( di_node != NULL )
 			{
-				display_info *mdi = ( display_info * )di_node->data;
-				if ( mdi != NULL )
+				display_info *di = ( display_info * )di_node->data;
+				if ( di != NULL )
 				{
 					if ( list_type == LIST_TYPE_ALLOW )
 					{
-						mdi->allow_phone_number = add_value;
+						di->allow_phone_number = add_value;
 					}
 					else
 					{
-						mdi->ignore_phone_number = add_value;
+						di->ignore_phone_number = add_value;
 					}
 				}
 
@@ -73,20 +73,20 @@ void update_phone_number_matches( wchar_t *phone_number, unsigned char list_type
 			DoublyLinkedList *di_node = ( DoublyLinkedList * )node->val;
 			while ( di_node != NULL )
 			{
-				display_info *mdi = ( display_info * )di_node->data;
-				if ( mdi != NULL )
+				display_info *di = ( display_info * )di_node->data;
+				if ( di != NULL )
 				{
 					bool *phone_number_state;
 					dllrbt_tree *list;
 
 					if ( list_type == LIST_TYPE_ALLOW )
 					{
-						phone_number_state = &mdi->allow_phone_number;
+						phone_number_state = &di->allow_phone_number;
 						list = allow_list;
 					}
 					else
 					{
-						phone_number_state = &mdi->ignore_phone_number;
+						phone_number_state = &di->ignore_phone_number;
 						list = ignore_list;
 					}
 
@@ -97,14 +97,14 @@ void update_phone_number_matches( wchar_t *phone_number, unsigned char list_type
 						if ( !add_value )
 						{
 							// First, see if the display value falls within another range.
-							if ( range != NULL && RangeSearch( range, mdi->phone_number, range_number ) )
+							if ( range != NULL && RangeSearch( range, di->phone_number, range_number ) )
 							{
 								// If it does, then we'll skip the display value.
 								break;
 							}
 
 							// Next, see if the display value exists as a non-range value.
-							if ( dllrbt_find( list, ( void * )mdi->phone_number, false ) != NULL )
+							if ( dllrbt_find( list, ( void * )di->phone_number, false ) != NULL )
 							{
 								// If it does, then we'll skip the display value.
 								break;
@@ -112,7 +112,7 @@ void update_phone_number_matches( wchar_t *phone_number, unsigned char list_type
 						}
 
 						// Finally, see if the display item falls within the range.
-						if ( RangeCompare( phone_number, mdi->phone_number ) )
+						if ( RangeCompare( phone_number, di->phone_number ) )
 						{
 							*phone_number_state = add_value;
 						}
@@ -128,18 +128,18 @@ void update_phone_number_matches( wchar_t *phone_number, unsigned char list_type
 }
 
 // If the caller ID name matches a value in our info structure, then set the state if we're adding or removing it.
-void update_caller_id_name_matches( void *cidi, unsigned char list_type, bool add_value )
+void update_caller_id_name_matches( void *aicidi, unsigned char list_type, bool add_value )
 {
-	if ( cidi == NULL )
+	if ( aicidi == NULL )
 	{
 		return;
 	}
 
-	wchar_t *caller_id = ( ( allow_ignore_cid_info * )cidi )->caller_id;
-	bool match_case = ( ( ( allow_ignore_cid_info * )cidi )->match_flag & 0x02 ? true : false );
-	bool match_whole_word = ( ( ( allow_ignore_cid_info * )cidi )->match_flag & 0x01 ? true : false );
-	bool regular_expression = ( ( ( allow_ignore_cid_info * )cidi )->match_flag & 0x04 ? true : false );
-	bool *active = &( ( ( allow_ignore_cid_info * )cidi )->active );
+	wchar_t *caller_id = ( ( allow_ignore_cid_info * )aicidi )->caller_id;
+	bool match_case = ( ( ( allow_ignore_cid_info * )aicidi )->match_flag & 0x02 ? true : false );
+	bool match_whole_word = ( ( ( allow_ignore_cid_info * )aicidi )->match_flag & 0x01 ? true : false );
+	bool regular_expression = ( ( ( allow_ignore_cid_info * )aicidi )->match_flag & 0x04 ? true : false );
+	bool *active = &( ( ( allow_ignore_cid_info * )aicidi )->active );
 
 	bool update_cid_state = false;
 
@@ -166,8 +166,8 @@ void update_caller_id_name_matches( void *cidi, unsigned char list_type, bool ad
 		DoublyLinkedList *di_node = ( DoublyLinkedList * )node->val;
 		while ( di_node != NULL )
 		{
-			display_info *mdi = ( display_info * )di_node->data;
-			if ( mdi != NULL )
+			display_info *di = ( display_info * )di_node->data;
+			if ( di != NULL )
 			{
 				if ( regular_expression )
 				{
@@ -175,8 +175,8 @@ void update_caller_id_name_matches( void *cidi, unsigned char list_type, bool ad
 					{
 						if ( regex_match_data != NULL )
 						{
-							int caller_id_length = lstrlenW( mdi->caller_id );
-							if ( _pcre2_match_16( regex_code, ( PCRE2_SPTR16 )mdi->caller_id, caller_id_length, 0, 0, regex_match_data, NULL ) >= 0 )
+							int caller_id_length = lstrlenW( di->caller_id );
+							if ( _pcre2_match_16( regex_code, ( PCRE2_SPTR16 )di->caller_id, caller_id_length, 0, 0, regex_match_data, NULL ) >= 0 )
 							{
 								update_cid_state = true;
 							}
@@ -185,28 +185,28 @@ void update_caller_id_name_matches( void *cidi, unsigned char list_type, bool ad
 				}
 				else if ( match_case && match_whole_word )
 				{
-					if ( lstrcmpW( mdi->caller_id, caller_id ) == 0 )
+					if ( lstrcmpW( di->caller_id, caller_id ) == 0 )
 					{
 						update_cid_state = true;
 					}
 				}
 				else if ( !match_case && match_whole_word )
 				{
-					if ( lstrcmpiW( mdi->caller_id, caller_id ) == 0 )
+					if ( lstrcmpiW( di->caller_id, caller_id ) == 0 )
 					{
 						update_cid_state = true;
 					}
 				}
 				else if ( match_case && !match_whole_word )
 				{
-					if ( _StrStrW( mdi->caller_id, caller_id ) != NULL )
+					if ( _StrStrW( di->caller_id, caller_id ) != NULL )
 					{
 						update_cid_state = true;
 					}
 				}
 				else if ( !match_case && !match_whole_word )
 				{
-					if ( _StrStrIW( mdi->caller_id, caller_id ) != NULL )
+					if ( _StrStrIW( di->caller_id, caller_id ) != NULL )
 					{
 						update_cid_state = true;
 					}
@@ -220,29 +220,29 @@ void update_caller_id_name_matches( void *cidi, unsigned char list_type, bool ad
 
 						if ( list_type == LIST_TYPE_ALLOW )
 						{
-							++( mdi->allow_cid_match_count );
+							++( di->allow_cid_match_count );
 						}
 						else
 						{
-							++( mdi->ignore_cid_match_count );
+							++( di->ignore_cid_match_count );
 						}
 					}
 					else
 					{
 						if ( list_type == LIST_TYPE_ALLOW )
 						{
-							--( mdi->allow_cid_match_count );
+							--( di->allow_cid_match_count );
 
-							if ( mdi->allow_cid_match_count == 0 )
+							if ( di->allow_cid_match_count == 0 )
 							{
 								*active = false;
 							}
 						}
 						else
 						{
-							--( mdi->ignore_cid_match_count );
+							--( di->ignore_cid_match_count );
 
-							if ( mdi->ignore_cid_match_count == 0 )
+							if ( di->ignore_cid_match_count == 0 )
 							{
 								*active = false;
 							}
@@ -517,13 +517,13 @@ THREAD_RETURN import_list( void *pArguments )
 
 							if ( iei->file_type == IE_ALLOW_PN_LIST )
 							{
-								list_type = 0;
+								list_type = LIST_TYPE_ALLOW;
 								list = allow_list;
 								changed = &allow_list_changed;
 							}
 							else
 							{
-								list_type = 1;
+								list_type = LIST_TYPE_IGNORE;
 								list = ignore_list;
 								changed = &ignore_list_changed;
 							}
@@ -572,13 +572,13 @@ THREAD_RETURN import_list( void *pArguments )
 
 							if ( iei->file_type == IE_ALLOW_CID_LIST )
 							{
-								list_type = 0;
+								list_type = LIST_TYPE_ALLOW;
 								list = allow_cid_list;
 								changed = &allow_cid_list_changed;
 							}
 							else
 							{
-								list_type = 1;
+								list_type = LIST_TYPE_IGNORE;
 								list = ignore_cid_list;
 								changed = &ignore_cid_list_changed;
 							}
@@ -764,7 +764,7 @@ THREAD_RETURN remove_items( void *pArguments )
 		lvi.iItem = -1;	// Set this to -1 so that the LVM_GETNEXTITEM call can go through the list correctly.
 
 		// Create an index list of selected items (in reverse order).
-		for ( int i = 0; i < sel_count; i++ )
+		for ( int i = 0; i < sel_count; ++i )
 		{
 			lvi.iItem = index_array[ sel_count - 1 - i ] = ( int )_SendMessageW( hWnd, LVM_GETNEXTITEM, lvi.iItem, LVNI_SELECTED );
 		}
@@ -948,7 +948,7 @@ THREAD_RETURN remove_items( void *pArguments )
 			allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )lvi.lParam;
 			if ( aicidi != NULL )
 			{
-				update_caller_id_name_matches( ( void * )aicidi, 0, false );
+				update_caller_id_name_matches( ( void * )aicidi, LIST_TYPE_ALLOW, false );
 
 				// See if the allow_cid_list value exits. It should.
 				dllrbt_iterator *itr = dllrbt_find( allow_cid_list, ( void * )aicidi, false );
@@ -969,7 +969,7 @@ THREAD_RETURN remove_items( void *pArguments )
 			allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )lvi.lParam;
 			if ( aicidi != NULL )
 			{
-				update_caller_id_name_matches( ( void * )aicidi, 1, false );
+				update_caller_id_name_matches( ( void * )aicidi, LIST_TYPE_IGNORE, false );
 
 				// See if the ignore_cid_list value exits. It should.
 				dllrbt_iterator *itr = dllrbt_find( ignore_cid_list, ( void * )aicidi, false );
@@ -1326,9 +1326,9 @@ THREAD_RETURN update_allow_ignore_list( void *pArguments )
 				display_info *di = ( display_info * )lvi.lParam;
 				if ( di != NULL )
 				{
-					bool *phone_number_state = ( aiui->list_type == LIST_TYPE_ALLOW ? &di->allow_phone_number : &di->ignore_phone_number );
+					bool phone_number_state = ( aiui->list_type == LIST_TYPE_ALLOW ? di->allow_phone_number : di->ignore_phone_number );
 
-					if ( *phone_number_state && aiui->action == 1 )		// Remove from allow/ignore_list.
+					if ( phone_number_state && aiui->action == 1 )		// Remove from allow/ignore_list.
 					{
 						wchar_t range_number[ 32 ];	// Dummy value.
 
@@ -1367,8 +1367,6 @@ THREAD_RETURN update_allow_ignore_list( void *pArguments )
 
 								*changed = true;	// Causes us to save the allow/ignore_list on shutdown.
 							}
-
-							*phone_number_state = false;
 						}
 						else
 						{
@@ -1379,7 +1377,7 @@ THREAD_RETURN update_allow_ignore_list( void *pArguments )
 							}
 						}
 					}
-					else if ( !( *phone_number_state ) && aiui->action == 0 )	// Add to allow/ignore_list.
+					else if ( !phone_number_state && aiui->action == 0 )	// Add to allow/ignore_list.
 					{
 						// Zero init.
 						allow_ignore_info *aii = ( allow_ignore_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_info ) );
@@ -1401,8 +1399,6 @@ THREAD_RETURN update_allow_ignore_list( void *pArguments )
 
 							// Update all nodes if it already exits.
 							update_phone_number_matches( aii->phone_number, aiui->list_type, false, NULL, true );
-
-							*phone_number_state = true;
 
 							*changed = true;
 
@@ -1883,11 +1879,11 @@ THREAD_RETURN update_allow_ignore_cid_list( void *pArguments )
 				display_info *di = ( display_info * )lvi.lParam;
 				if ( di != NULL )
 				{
-					unsigned int *cid_match_count_state = ( aicidui->list_type == LIST_TYPE_ALLOW ? &di->allow_cid_match_count : &di->ignore_cid_match_count );
+					unsigned int cid_match_count_state = ( aicidui->list_type == LIST_TYPE_ALLOW ? di->allow_cid_match_count : di->ignore_cid_match_count );
 
-					if ( *cid_match_count_state > 0 && aicidui->action == 1 )		// Remove from allow/ignore_cid_list.
+					if ( cid_match_count_state > 0 && aicidui->action == 1 )		// Remove from allow/ignore_cid_list.
 					{
-						if ( *cid_match_count_state <= 1 )
+						if ( cid_match_count_state <= 1 )
 						{
 							bool update_cid_state = false;
 
@@ -1987,7 +1983,7 @@ THREAD_RETURN update_allow_ignore_cid_list( void *pArguments )
 							}
 						}
 					}
-					else if ( *cid_match_count_state == 0 && aicidui->action == 0 )	// Add to allow/ignore_cid_list.
+					else if ( cid_match_count_state == 0 && aicidui->action == 0 )	// Add to allow/ignore_cid_list.
 					{
 						// Zero init.
 						allow_ignore_cid_info *aicidi = ( allow_ignore_cid_info * )GlobalAlloc( GPTR, sizeof( allow_ignore_cid_info ) );
@@ -2426,7 +2422,7 @@ THREAD_RETURN update_call_log( void *pArguments )
 					aiui->phone_number = GlobalStrDupW( di->phone_number );
 
 					// Add items. aiui is freed in the update_allow_ignore_list thread.
-					HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_list, ( void * )aiui, 0, NULL );
+					thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_list, ( void * )aiui, 0, NULL );
 					if ( thread != NULL )
 					{
 						CloseHandle( thread );
@@ -2495,7 +2491,7 @@ THREAD_RETURN update_call_log( void *pArguments )
 					aiui->phone_number = GlobalStrDupW( di->phone_number );
 
 					// Add items. aiui is freed in the update_allow_ignore_list thread.
-					HANDLE thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_list, ( void * )aiui, 0, NULL );
+					thread = ( HANDLE )_CreateThread( NULL, 0, update_allow_ignore_list, ( void * )aiui, 0, NULL );
 					if ( thread != NULL )
 					{
 						CloseHandle( thread );
@@ -2718,6 +2714,11 @@ THREAD_RETURN copy_items( void *pArguments )
 		}
 
 		_SendMessageW( hWnd, LVM_GETITEM, 0, ( LPARAM )&lvi );
+
+		if ( lvi.lParam == NULL )
+		{
+			continue;
+		}
 
 		display_info *di = NULL;
 		contact_info *ci = NULL;
